@@ -19,7 +19,7 @@ that.
 
 ## What Jogether does
 
-**The hook: one sentence in, a route out.**
+**The MVP: four answers in, one route out.**
 
 1. Sign in with your umich.edu email.
 2. Answer four quick questions: your level, distance, area, and time of day.
@@ -42,26 +42,64 @@ that.
 
 ## Getting started
 
-Install Jac:
+Install the Jac version tested by this prototype (0.37.25):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash -s -- --version 0.37.25
 ```
 
-Run the app from the repository root:
+Run the local request demo from the repository root. No API key, external
+service, or database is required:
 
 ```bash
-jac install
 jac run
 ```
 
-Setup for the mobile app, the CLI, and environment variables will be
-documented here as they land.
+The default demo accepts a beginner's 2 km request for central campus in the
+morning and prints JSON with `accepted: true` and `route_generated: false`.
+Try different answers:
+
+```bash
+jac run main.jac --level intermediate --distance-km 5 --area north-campus --time-of-day evening
+jac run main.jac --distance-km 0
+```
+
+The second command prints a distance error and exits with code 2.
+Malformed CLI arguments also exit with code 2. A successful preview only
+validates the request; it does not recommend a route or assess safety.
+
+Initial prototype options:
+
+- Level: `beginner`, `intermediate`, `experienced`
+- Distance: finite number from 0.5 to 10 km, including both boundaries
+- Area: `central-campus`, `north-campus`, `downtown`
+- Time: `morning`, `afternoon`, `evening`
+
+These options and bounds are initial product assumptions, not verified route
+coverage, a medical recommendation, or a safety guarantee. Keep the form in
+sync with `routes.jac` when the team changes them.
+
+Check the code and run the tests:
+
+```bash
+jac check main.jac routes.jac tests/routes_tests.jac
+jac fmt --check main.jac routes.jac tests/routes_tests.jac
+jac test -v
+```
+
+`main.jac` handles the CLI. `routes.jac` defines the typed request/result and
+shared validation function, ready for reuse by the future web form and
+ByLLM route call. Tests cover accepted choices, distance boundaries,
+NaN/infinity, invalid options, and reporting all errors together.
+
+Authentication, the web/mobile UI, route generation, and save/rate are not
+implemented in this prototype. See [the development notes](docs/development.md)
+for the next handoff.
 
 ## Status
 
-Week 5. Project skeleton and wireframes in progress. MVP pitch: November 2.
-Public launch: November 16.
+Project week 2 (October 7, course week 6): local Jac request prototype ready
+for review. MVP pitch: November 2. Public launch: November 16.
 
 ## Team
 

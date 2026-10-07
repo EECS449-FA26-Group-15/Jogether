@@ -1,0 +1,10 @@
+[project]
+name = "jogether"
+version = "0.1.0"
+description = "Jogether route request prototype"
+entry-point = "main"
+kind = "cli"
+jac-version = "==0.37.25"
+
+[test]
+directory = "tests"
