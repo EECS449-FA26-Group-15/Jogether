@@ -45,7 +45,22 @@ that.
 Install the Jac version tested by this prototype (0.37.25):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash -s -- --version 0.37.25
+# Linux or Apple Silicon macOS; Windows users can use WSL2.
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) JAC_PLATFORM=linux-x86_64 ;;
+  Linux-aarch64) JAC_PLATFORM=linux-aarch64 ;;
+  Darwin-arm64) JAC_PLATFORM=macos-aarch64 ;;
+  *) echo "This release has no binary for this platform"; exit 1 ;;
+esac
+JAC_ASSET="jac-0.37.25-$JAC_PLATFORM"
+JAC_URL="https://github.com/jaseci-labs/jac/releases/download/v0.37.25/$JAC_ASSET"
+mkdir -p .jac/bin
+curl -fL --retry 3 "$JAC_URL" -o ".jac/bin/$JAC_ASSET" || exit 1
+curl -fL --retry 3 "$JAC_URL.sha256" -o ".jac/bin/$JAC_ASSET.sha256" || exit 1
+(cd .jac/bin && shasum -a 256 -c "$JAC_ASSET.sha256") || exit 1
+mv ".jac/bin/$JAC_ASSET" .jac/bin/jac
+chmod +x .jac/bin/jac
+export PATH="$PWD/.jac/bin:$PATH"
 ```
 
 Run the local request demo from the repository root. No API key, external
