@@ -79,4 +79,3 @@ test "reports all invalid answers at once" {
     assert not result.accepted;
     assert len(result.errors) == 4;
 }
-
