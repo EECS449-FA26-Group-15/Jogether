@@ -1,0 +1,36 @@
+name: Jac checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Jac runtime
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o "$RUNNER_TEMP/install-jac.sh"
+          bash "$RUNNER_TEMP/install-jac.sh" --version 0.37.25
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check types and formatting
+        run: |
+          jac check main.jac routes.jac tests/routes_tests.jac
+          jac fmt --check main.jac routes.jac tests/routes_tests.jac
+      - name: Run request tests and happy path
+        run: |
+          jac test -v
+          jac run
+      - name: Verify invalid CLI input exits with code 2
+        shell: bash
+        run: |
+          set +e
+          jac run main.jac --distance-km 0
+          status=$?
+          set -e
+          test "$status" -eq 2
