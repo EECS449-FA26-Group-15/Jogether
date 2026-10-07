@@ -15,9 +15,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned Jac runtime
         run: |
-          curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh -o "$RUNNER_TEMP/install-jac.sh"
-          bash "$RUNNER_TEMP/install-jac.sh" --version 0.37.25
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/jac-bin"
+          curl -fL --retry 3 https://github.com/jaseci-labs/jac/releases/download/v0.37.25/jac-0.37.25-linux-x86_64 -o "$RUNNER_TEMP/jac-bin/jac"
+          echo "a7d29cc7b35cc25b8697510e7d31fcb3403a11451d5693f57e0918a7420cf2c2  $RUNNER_TEMP/jac-bin/jac" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/jac-bin/jac"
+          echo "$RUNNER_TEMP/jac-bin" >> "$GITHUB_PATH"
       - name: Check types and formatting
         run: |
           jac check main.jac routes.jac tests/routes_tests.jac
