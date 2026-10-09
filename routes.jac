@@ -32,3 +32,16 @@ def validate_request(request: RunRequest) -> ValidationResult {
     }
     return ValidationResult(accepted=len(errors) == 0, errors=errors, request=request);
 }
+obj Waypoint {
+    has name: str;
+    has note: str;
+}
+
+obj RouteResult {
+    has title: str;
+    has waypoints: list[Waypoint];
+    has distance_km: float;
+    has difficulty: int;
+    has difficulty_reason: str;
+    has safety_notes: list[str];
+}
