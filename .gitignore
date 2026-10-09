@@ -1,0 +1,9 @@
+.jac/
+.venv/
+__pycache__/
+*.pyc
+*.jir
+.env
+.env.*
+!.env.example
+.DS_Store
