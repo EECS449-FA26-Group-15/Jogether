@@ -80,8 +80,26 @@ jac run main.jac --distance-km 0
 ```
 
 The second command prints a distance error and exits with code 2.
-Malformed CLI arguments also exit with code 2. A successful preview only
-validates the request; it does not recommend a route or assess safety.
+Malformed CLI arguments also exit with code 2. Without `--generate`, a
+successful preview only validates the request.
+
+### Generate a route with a free local model
+
+Route generation runs on [Ollama](https://ollama.com/download) with
+`gemma3:4b` (set in `jac.toml`; the final model is chosen in issue #7).
+No API key is needed:
+
+```bash
+ollama pull gemma3:4b
+jac install
+jac run main.jac --generate
+```
+
+The agent may only use landmarks for the chosen area from `landmarks.jac`.
+Each route is checked (known landmarks, difficulty 1–5, at most 3 safety
+notes) and regenerated once if it fails. If both attempts fail, the command
+exits with code 1. The landmark list is a draft: check lighting and surface
+on the ground before trusting the safety notes.
 
 Initial prototype options:
 
@@ -97,18 +115,17 @@ sync with `routes.jac` when the team changes them.
 Check the code and run the tests:
 
 ```bash
-jac check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac
-jac fmt --check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac
+jac check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
+jac fmt --check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
 jac test -v
 ```
 
-`main.jac` handles the CLI. `routes.jac` defines the typed request/result and
-shared validation function, ready for reuse by the future web form and
-ByLLM route call. Tests cover accepted choices, distance boundaries,
-NaN/infinity, invalid options, and reporting all errors together.
+`main.jac` handles the CLI. `routes.jac` defines the request validation, the
+`RouteResult` shape, the ByLLM route call and its output check.
+`landmarks.jac` holds the landmark list. Tests use a mocked LLM, so CI never
+calls a real model.
 
-Authentication, the web/mobile UI, route generation, and save/rate are not
-implemented in this prototype. See [the development notes](docs/development.md)
+Authentication, the web/mobile UI, and save/rate are not implemented yet. See [the development notes](docs/development.md)
 for the next handoff.
 
 ## Status

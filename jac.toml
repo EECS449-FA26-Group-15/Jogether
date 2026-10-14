@@ -8,3 +8,6 @@ jac-version = "==0.37.25"
 
 [test]
 directory = "tests"
+
+[byllm.model]
+default_model = "ollama/gemma3:4b"

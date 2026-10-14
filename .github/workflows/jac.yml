@@ -20,11 +20,13 @@ jobs:
           echo "a7d29cc7b35cc25b8697510e7d31fcb3403a11451d5693f57e0918a7420cf2c2  $RUNNER_TEMP/jac-bin/jac" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/jac-bin/jac"
           echo "$RUNNER_TEMP/jac-bin" >> "$GITHUB_PATH"
+      - name: Install ByLLM dependencies for the mocked LLM tests
+        run: jac install
       - name: Check types and formatting
         run: |
-          jac check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac
-          jac fmt --check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac
-      - name: Run request tests and happy path
+          jac check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
+          jac fmt --check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
+      - name: Run tests and happy path (no real model call)
         run: |
           jac test -v
           jac run
