@@ -1,7 +1,6 @@
 """Validate the four MVP answers and plan a route from known landmarks."""
 
 import math;
-import from typing { Callable }
 import from landmarks { Landmark, landmarks_for }
 
 obj RunRequest {

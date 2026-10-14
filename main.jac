@@ -6,7 +6,7 @@ import math;
 import sys;
 import from routes { RouteResult, RunRequest, generate_route, validate_request }
 
-def route_json(route: RouteResult) -> dict {
+def route_json(route: RouteResult) -> dict[str, any] {
     return {
         "title": route.title,
         "waypoints": [{"name": w.name, "note": w.note} for w in route.waypoints],
