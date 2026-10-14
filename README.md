@@ -97,8 +97,8 @@ sync with `routes.jac` when the team changes them.
 Check the code and run the tests:
 
 ```bash
-jac check main.jac routes.jac tests/routes_tests.jac
-jac fmt --check main.jac routes.jac tests/routes_tests.jac
+jac check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac
+jac fmt --check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac
 jac test -v
 ```
 
