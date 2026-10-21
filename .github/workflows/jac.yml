@@ -24,8 +24,8 @@ jobs:
         run: jac install
       - name: Check types and formatting
         run: |
-          jac check main.jac planner.jac frontend.jac cli.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
-          jac fmt --check main.jac planner.jac frontend.jac cli.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
+          jac check main.jac planner.jac frontend.jac cli.jac routes.jac geo.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac tests/geo_tests.jac
+          jac fmt --check main.jac planner.jac frontend.jac cli.jac routes.jac geo.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac tests/geo_tests.jac
       - name: Run tests and happy path (no real model call)
         run: |
           jac test -v

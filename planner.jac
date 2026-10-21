@@ -1,7 +1,9 @@
 """Server endpoints the web page calls: plan a run, or fetch the example route."""
 
 import time;
+import traceback;
 import urllib.parse;
+import from geo { COORDS }
 import from routes {
     RouteResult,
     RunRequest,
@@ -20,21 +22,28 @@ obj RunPlan {
         is_example: bool = False;
 }
 
-"""Google Maps walking directions through the route's waypoints, in order."""
+"""A place Google Maps can find: our coordinates when we have them, else the name."""
+def map_point(name: str) -> str {
+    if name in COORDS {
+        (lat, lon) = COORDS[name];
+        return f"{lat},{lon}";
+    }
+    return f"{name}, Ann Arbor, MI";
+}
+
+"""Google Maps walking directions for one loop: through every waypoint and back to the start."""
 def maps_link(route: RouteResult) -> str {
-    stops = [f"{w.name}, Ann Arbor, MI" for w in route.waypoints];
+    stops = [map_point(w.name) for w in route.waypoints];
     if len(stops) < 2 {
         return "";
     }
     params: dict[str, str] = {
         "api": "1",
         "origin": stops[0],
-        "destination": stops[-1],
+        "destination": stops[0],
+        "waypoints": "|".join(stops[1:]),
         "travelmode": "walking"
     };
-    if len(stops) > 2 {
-        params["waypoints"] = "|".join(stops[1:-1]);
-    }
     return "https://www.google.com/maps/dir/?" + urllib.parse.urlencode(params);
 }
 
@@ -83,6 +92,7 @@ def:pub plan_run(
     try {
         route = generate_route(request);
     } except Exception as err {
+        traceback.print_exc();
         kind = type(err).__name__;
         return RunPlan(
             accepted=True,

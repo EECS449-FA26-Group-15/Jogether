@@ -6,7 +6,8 @@ import from routes {
     landmarks_for,
     landmarks_for_time
 }
-import from planner { friendly, maps_link, parse_distance }
+import urllib.parse;
+import from planner { friendly, map_point, maps_link, parse_distance }
 
 test "validation messages use the labels shown on the page" {
     assert friendly("distance_km must be finite and between 0.5 and 10 km").startswith(
@@ -39,12 +40,20 @@ test "check rejects a route with more than six waypoints" {
     assert "waypoints" in errors[0];
 }
 
-test "maps link walks through every waypoint in order" {
+test "maps link is a loop through every waypoint" {
     link = maps_link(example_route());
     assert link.startswith("https://www.google.com/maps/dir/?api=1");
     assert "travelmode=walking" in link;
-    assert "Michigan+Union" in link;
-    assert "Burton+Memorial+Tower" in link;
+    union = urllib.parse.quote_plus(map_point("Michigan Union"));
+    burton = urllib.parse.quote_plus(map_point("Burton Memorial Tower"));
+    assert f"origin={union}" in link;
+    assert f"destination={union}" in link;
+    assert burton in link;
+}
+
+test "map points use coordinates when we have them" {
+    assert map_point("The Diag") == "42.2771,-83.73801";
+    assert map_point("Somewhere New") == "Somewhere New, Ann Arbor, MI";
 }
 
 test "distance text parses to a number or NaN" {

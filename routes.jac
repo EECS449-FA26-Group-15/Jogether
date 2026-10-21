@@ -2,6 +2,7 @@
 
 import math;
 import from landmarks { Landmark, landmarks_for }
+import from geo { RouteOption, loop_km, route_options }
 
 obj RunRequest {
     has level: str,
@@ -41,35 +42,52 @@ obj Waypoint {
         note: str;
 }
 
-"""The route shape shared by the route agent and the result page."""
+"""The route shape shared by the route agent and the result page.
+
+`distance_km` is measured by code from landmark coordinates (see geo.jac):
+one loop through the waypoints and back to the first one, times `laps`.
+"""
 obj RouteResult {
     has title: str,
         waypoints: list[Waypoint],
         distance_km: float,
         difficulty: int,
         difficulty_reason: str,
+        safety_notes: list[str],
+        laps: int = 1;
+}
+
+"""What the LLM decides: which measured option to run, and how to describe it."""
+obj RoutePick {
+    has option: int,
+        title: str,
+        stops: list[Waypoint],
+        difficulty: int,
+        difficulty_reason: str,
         safety_notes: list[str];
 }
 
-sem RunRequest.notes = "Optional extra wishes from the runner in their own words; follow them when the landmarks allow";
-sem RouteResult.waypoints = "3 to 6 stops in running order, chosen to match the requested distance";
+sem RunRequest.notes = "Optional extra wishes from the runner in their own words; follow them when the options allow";
 sem Waypoint.name = "Exact name of a landmark from the given list";
 sem Waypoint.note = "One line on what the runner sees or does here";
-sem RouteResult.distance_km = "Estimated route length in km";
-sem RouteResult.difficulty = "1 (easiest) to 5 (hardest)";
-sem RouteResult.safety_notes = "At most 3 notes for the chosen time of day";
+sem RoutePick.option = "0-based index of the chosen option in the options list";
+sem RoutePick.title = "Short route name that matches the chosen stops; do not mention places that are not on the route";
+sem RoutePick.stops = "Each stop of the chosen option with a short note about that stop";
+sem RoutePick.difficulty = "1 (easiest) to 5 (hardest)";
+sem RoutePick.safety_notes = "At most 3 notes for the chosen time of day";
 
 """Hand-written sample route for building the result page without an LLM."""
 def example_route -> RouteResult {
+    stops = ["Michigan Union", "The Diag", "Ingalls Mall", "Burton Memorial Tower"];
     return RouteResult(
         title="Central campus starter loop",
         waypoints=[
-            Waypoint(name="Michigan Union", note="Start on the State Street steps"),
-            Waypoint(name="The Diag", note="Cut across the paved paths"),
-            Waypoint(name="Ingalls Mall", note="Easy stretch along the lawn"),
-            Waypoint(name="Burton Memorial Tower", note="Turn back toward State Street")
+            Waypoint(name=stops[0], note="Start on the State Street steps"),
+            Waypoint(name=stops[1], note="Cut across the paved paths"),
+            Waypoint(name=stops[2], note="Easy stretch along the lawn"),
+            Waypoint(name=stops[3], note="Turn back toward State Street")
         ],
-        distance_km=2.0,
+        distance_km=round(loop_km(stops), 1),
         difficulty=1,
         difficulty_reason="Short, flat and paved, with plenty of places to stop",
         safety_notes=[
@@ -79,13 +97,51 @@ def example_route -> RouteResult {
     );
 }
 
-"""Plan a running route in Ann Arbor that fits the runner's request.
+"""Choose the running route that best fits this runner, then describe it.
 
-Visit only landmarks from the list, in running order, using their exact names.
-Rate difficulty from the distance, the runner's level and the surfaces. Base
-safety notes on each landmark's lighting and the chosen time of day.
+Each option is a loop that is already measured: run its stops in order, return
+to the first stop, and repeat for its laps. Pick the option whose stops best
+match the runner's level, time of day and own words (notes), using the landmark
+descriptions, lighting and surfaces. Do not change, add or reorder stops. Rate
+difficulty from the option's distance, laps, the runner's level and the
+surfaces. Base safety notes on the chosen stops' lighting and the time of day.
 """
-def plan_route(request: RunRequest, landmarks: list[Landmark]) -> RouteResult by llm();
+def plan_route(
+    request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
+) -> RoutePick by llm();
+
+"""Turn the LLM's pick into a route; None if it names an option that does not exist.
+
+Notes are matched to stops by name, so a note can never land on the wrong stop.
+A stop the LLM did not describe gets its landmark description instead.
+"""
+def build_route(
+    pick: RoutePick, options: list[RouteOption], landmarks: list[Landmark]
+) -> RouteResult | None {
+    if not (0 <= pick.option < len(options)) {
+        return None;
+    }
+    chosen = options[pick.option];
+    written = {
+        w.name: w.note
+        for w in pick.stops
+        if w.note.strip()
+    };
+    described = {lm.name: lm.description for lm in landmarks};
+    waypoints = [
+        Waypoint(name=stop, note=written.get(stop, described.get(stop, "")))
+        for stop in chosen.stops
+    ];
+    return RouteResult(
+        title=pick.title,
+        waypoints=waypoints,
+        distance_km=chosen.distance_km,
+        difficulty=pick.difficulty,
+        difficulty_reason=pick.difficulty_reason,
+        safety_notes=pick.safety_notes,
+        laps=chosen.laps
+    );
+}
 
 """Return problems with a generated route; an empty list means it passes."""
 def check_route(route: RouteResult, landmarks: list[Landmark]) -> list[str] {
@@ -113,7 +169,10 @@ def check_route(route: RouteResult, landmarks: list[Landmark]) -> list[str] {
     return errors;
 }
 
-glob Planner = Callable[[RunRequest, list[Landmark]], RouteResult],
+glob Planner = Callable[
+         [RunRequest, list[Landmark], list[RouteOption]],
+         RoutePick
+     ],
      MAX_WAYPOINTS: int = 6;
 
 """Landmarks in an area that suit the time of day, or all of them if fewer than 3 do."""
@@ -127,14 +186,41 @@ def landmarks_for_time(area: str, time_of_day: str) -> list[Landmark] {
     return suitable if len(suitable) >= 3 else all_landmarks;
 }
 
-"""Plan a route for a validated request, retrying once if the check fails."""
-def generate_route(
-    request: RunRequest, planner: Planner = plan_route
-) -> RouteResult | None {
+"""Landmarks for this request: right for the time of day, and no dirt trails for beginners."""
+def landmarks_for_request(request: RunRequest) -> list[Landmark] {
     landmarks = landmarks_for_time(request.area, request.time_of_day);
+    if request.level == "beginner" {
+        easier = [
+            lm
+            for lm in landmarks
+            if lm.surface != "dirt trail"
+        ];
+        if len(easier) >= 3 {
+            return easier;
+        }
+    }
+    return landmarks;
+}
+
+"""Plan a route for a validated request, retrying once if the check fails.
+
+Code measures candidate loops near the requested distance; the LLM picks one
+and describes it.
+"""
+def generate_route(
+    request: RunRequest, planner: Planner = plan_route, seed: int | None = None
+) -> RouteResult | None {
+    landmarks = landmarks_for_request(request);
+    options = route_options(
+        [lm.name for lm in landmarks], request.distance_km, 3, seed
+    );
+    if len(options) == 0 {
+        return None;
+    }
     for _ in range(2) {
-        route = planner(request, landmarks);
-        if check_route(route, landmarks) == [] {
+        pick = planner(request, landmarks, options);
+        route = build_route(pick, options, landmarks);
+        if route is not None and check_route(route, landmarks) == [] {
             return route;
         }
     }

@@ -213,6 +213,12 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
             </div>;
     }
     dots = "●" * route.difficulty + "○" * (5 - route.difficulty);
+    one_loop = route.distance_km / route.laps if route.laps > 0 else route.distance_km;
+    distance_label = (
+        f"≈ {route.distance_km:.1f} km · {route.laps} laps of {one_loop:.1f} km"
+            if route.laps > 1
+            else f"≈ {route.distance_km:.1f} km loop"
+    );
     return
         <div style={card_style}>
             {if plan.is_example {
@@ -247,7 +253,7 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
                         "fontWeight": "600"
                     }}
                 >
-                    {f"{route.distance_km:.1f} km"}
+                    {distance_label}
                 </span>
                 <span
                     style={{
@@ -310,7 +316,9 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
                     rel="noreferrer"
                     style={{"color": GREEN, "fontWeight": "700"}}
                 >
-                    Open this route in Google Maps
+                    {"Open one loop in Google Maps"
+                        if route.laps > 1
+                        else "Open this loop in Google Maps"}
                 </a>
             }}
         </div>;

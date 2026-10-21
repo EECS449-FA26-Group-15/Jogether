@@ -91,10 +91,23 @@ broken IPv6), stop it and install them with npm instead, then run `jac run`:
 NODE_OPTIONS="--dns-result-order=ipv4first" npm install --prefix .jac/client
 ```
 
-The agent may only use landmarks for the chosen area from `landmarks.jac`, and
-only those that suit the chosen time of day. Each route is checked (known
-landmarks, 1 to 6 waypoints, difficulty 1-5, at most 3 safety notes) and
-regenerated once if it fails. If both attempts fail, the page says so and
+How a route is planned:
+
+1. Code keeps the landmarks in the chosen area that suit the time of day, and
+   drops dirt trails for beginners.
+2. Code builds loops of 3 to 6 of those landmarks from their coordinates
+   (`geo.jac`) and measures each one. When the area is too small for the
+   requested distance, a loop is repeated for 2 to 4 laps. The 3 loops closest
+   to the requested distance become the options.
+3. The LLM picks the option that best fits the runner's level, time of day and
+   own words, then writes the title, a note per stop, the difficulty and the
+   safety notes.
+4. The distance on the card comes from step 2, not from the LLM. It is the
+   straight-line distance between stops times 1.3, so it is an estimate; the
+   Google Maps link shows the walking distance of one loop.
+
+Each route is checked (known landmarks, 1 to 6 waypoints, difficulty 1-5, at
+most 3 safety notes) and regenerated once if it fails. If both attempts fail, the page says so and
 offers the hand-written example route, clearly labelled as an example. The
 landmark list is a draft: check lighting and surface on the ground before
 trusting the safety notes.
@@ -131,8 +144,8 @@ sync with `routes.jac` when the team changes them.
 Check the code and run the tests:
 
 ```bash
-jac check main.jac planner.jac frontend.jac cli.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac
-jac fmt --check main.jac planner.jac frontend.jac cli.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac
+jac check main.jac planner.jac frontend.jac cli.jac routes.jac geo.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac tests/geo_tests.jac
+jac fmt --check main.jac planner.jac frontend.jac cli.jac routes.jac geo.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac tests/geo_tests.jac
 jac test -v
 ```
 
@@ -142,6 +155,7 @@ jac test -v
 | `frontend.jac` | The page: the four questions, the Generate button, the route card |
 | `planner.jac` | Endpoints the page calls: `plan_run` and `sample_run`, plus the Google Maps link |
 | `routes.jac` | Request validation, the `RouteResult` shape, the ByLLM route call and its output check |
+| `geo.jac` | Landmark coordinates, measured loop distances, and the candidate loops the LLM chooses from |
 | `landmarks.jac` | The curated landmark list |
 | `cli.jac` | Command-line preview of the same planner |
 
