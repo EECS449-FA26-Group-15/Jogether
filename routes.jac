@@ -4,16 +4,17 @@ import math;
 import from landmarks { Landmark, landmarks_for }
 
 obj RunRequest {
-    has level: str;
-    has distance_km: float;
-    has area: str;
-    has time_of_day: str;
+    has level: str,
+        distance_km: float,
+        area: str,
+        time_of_day: str,
+        notes: str = "";
 }
 
 obj ValidationResult {
-    has accepted: bool;
-    has errors: list[str];
-    has request: RunRequest;
+    has accepted: bool,
+        errors: list[str],
+        request: RunRequest;
 }
 
 def validate_request(request: RunRequest) -> ValidationResult {
@@ -36,20 +37,22 @@ def validate_request(request: RunRequest) -> ValidationResult {
 
 """One stop on a route, named after a landmark from landmarks.jac."""
 obj Waypoint {
-    has name: str;
-    has note: str;
+    has name: str,
+        note: str;
 }
 
 """The route shape shared by the route agent and the result page."""
 obj RouteResult {
-    has title: str;
-    has waypoints: list[Waypoint];
-    has distance_km: float;
-    has difficulty: int;
-    has difficulty_reason: str;
-    has safety_notes: list[str];
+    has title: str,
+        waypoints: list[Waypoint],
+        distance_km: float,
+        difficulty: int,
+        difficulty_reason: str,
+        safety_notes: list[str];
 }
 
+sem RunRequest.notes = "Optional extra wishes from the runner in their own words; follow them when the landmarks allow";
+sem RouteResult.waypoints = "3 to 6 stops in running order, chosen to match the requested distance";
 sem Waypoint.name = "Exact name of a landmark from the given list";
 sem Waypoint.note = "One line on what the runner sees or does here";
 sem RouteResult.distance_km = "Estimated route length in km";
@@ -90,6 +93,8 @@ def check_route(route: RouteResult, landmarks: list[Landmark]) -> list[str] {
     names = [landmark.name for landmark in landmarks];
     if len(route.waypoints) == 0 {
         errors.append("route has no waypoints");
+    } elif len(route.waypoints) > MAX_WAYPOINTS {
+        errors.append(f"at most {MAX_WAYPOINTS} waypoints");
     }
     for waypoint in route.waypoints {
         if waypoint.name not in names {
@@ -108,13 +113,25 @@ def check_route(route: RouteResult, landmarks: list[Landmark]) -> list[str] {
     return errors;
 }
 
-glob Planner = Callable[[RunRequest, list[Landmark]], RouteResult];
+glob Planner = Callable[[RunRequest, list[Landmark]], RouteResult],
+     MAX_WAYPOINTS: int = 6;
+
+"""Landmarks in an area that suit the time of day, or all of them if fewer than 3 do."""
+def landmarks_for_time(area: str, time_of_day: str) -> list[Landmark] {
+    all_landmarks = landmarks_for(area);
+    suitable = [
+        lm
+        for lm in all_landmarks
+        if time_of_day in lm.good_times
+    ];
+    return suitable if len(suitable) >= 3 else all_landmarks;
+}
 
 """Plan a route for a validated request, retrying once if the check fails."""
 def generate_route(
     request: RunRequest, planner: Planner = plan_route
 ) -> RouteResult | None {
-    landmarks = landmarks_for(request.area);
+    landmarks = landmarks_for_time(request.area, request.time_of_day);
     for _ in range(2) {
         route = planner(request, landmarks);
         if check_route(route, landmarks) == [] {

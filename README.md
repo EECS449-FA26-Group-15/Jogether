@@ -19,13 +19,18 @@ that.
 
 ## What Jogether does
 
-**The MVP: four answers in, one route out.**
+**The hook: one sentence in, a route out.**
 
-1. Sign in with your umich.edu email.
-2. Answer four quick questions: your level, distance, area, and time of day.
-3. Tap **Generate**. An LLM agent reasons over your constraints and local
-   geography and returns a route, a difficulty rating, and safety notes.
-4. Save it, run it, and rate it afterwards.
+The web demo works today:
+
+1. Answer four quick questions: your level, distance, area, and time of day.
+2. Optionally add a wish in your own words, like "I'd like to run along the river".
+3. Tap **Generate**. An LLM agent picks landmarks that suit your time of day,
+   orders them into a route, rates its difficulty, and writes safety notes.
+4. Open the route in Google Maps.
+
+Still to come for the MVP: sign in with your umich.edu email, then save, run,
+and rate your routes.
 
 **Coming next: the community layer.**
 
@@ -63,27 +68,7 @@ chmod +x .jac/bin/jac
 export PATH="$PWD/.jac/bin:$PATH"
 ```
 
-Run the local request demo from the repository root. No API key, external
-service, or database is required:
-
-```bash
-jac run
-```
-
-The default demo accepts a beginner's 2 km request for central campus in the
-morning and prints JSON with `accepted: true` and `route_generated: false`.
-Try different answers:
-
-```bash
-jac run main.jac --level intermediate --distance-km 5 --area north-campus --time-of-day evening
-jac run main.jac --distance-km 0
-```
-
-The second command prints a distance error and exits with code 2.
-Malformed CLI arguments also exit with code 2. Without `--generate`, a
-successful preview only validates the request.
-
-### Generate a route with a free local model
+### Run the web demo
 
 Route generation runs on [Ollama](https://ollama.com/download) with
 `gemma3:4b` (set in `jac.toml`; the final model is chosen in issue #7).
@@ -92,14 +77,45 @@ No API key is needed:
 ```bash
 ollama pull gemma3:4b
 jac install
-jac run main.jac --generate
+jac run
 ```
 
-The agent may only use landmarks for the chosen area from `landmarks.jac`.
-Each route is checked (known landmarks, difficulty 1–5, at most 3 safety
-notes) and regenerated once if it fails. If both attempts fail, the command
-exits with code 1. The landmark list is a draft: check lighting and surface
-on the ground before trusting the safety notes.
+Open http://localhost:8000, answer the questions, and tap **Generate my
+route**. The first request loads the model into memory and takes longer; after
+that a route takes a few seconds on an Apple Silicon laptop.
+
+If `jac install` hangs while installing the web packages (seen on networks with
+broken IPv6), stop it and install them with npm instead, then run `jac run`:
+
+```bash
+NODE_OPTIONS="--dns-result-order=ipv4first" npm install --prefix .jac/client
+```
+
+The agent may only use landmarks for the chosen area from `landmarks.jac`, and
+only those that suit the chosen time of day. Each route is checked (known
+landmarks, 1 to 6 waypoints, difficulty 1-5, at most 3 safety notes) and
+regenerated once if it fails. If both attempts fail, the page says so and
+offers the hand-written example route, clearly labelled as an example. The
+landmark list is a draft: check lighting and surface on the ground before
+trusting the safety notes.
+
+### Command-line preview
+
+The same planner runs from the terminal through `cli.jac`. Without
+`--generate` it only validates the answers, so it needs no model.
+`--no-takeover` runs the file on its own instead of as the web app:
+
+```bash
+jac run --no-takeover cli.jac
+jac run --no-takeover cli.jac --level intermediate --distance-km 5 --area north-campus --time-of-day evening
+jac run --no-takeover cli.jac --distance-km 0
+jac run --no-takeover cli.jac --generate
+```
+
+The default preview accepts a beginner's 2 km request for central campus in
+the morning. An invalid answer, such as a 0 km distance, prints an error and
+exits with code 2. With `--generate`, the command exits with code 1 if both
+attempts fail.
 
 Initial prototype options:
 
@@ -115,23 +131,29 @@ sync with `routes.jac` when the team changes them.
 Check the code and run the tests:
 
 ```bash
-jac check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
-jac fmt --check main.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac
+jac check main.jac planner.jac frontend.jac cli.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac
+jac fmt --check main.jac planner.jac frontend.jac cli.jac routes.jac landmarks.jac tests/routes_tests.jac tests/landmarks_tests.jac tests/route_agent_tests.jac tests/planner_tests.jac
 jac test -v
 ```
 
-`main.jac` handles the CLI. `routes.jac` defines the request validation, the
-`RouteResult` shape, the ByLLM route call and its output check.
-`landmarks.jac` holds the landmark list. Tests use a mocked LLM, so CI never
-calls a real model.
+| File | What it does |
+|---|---|
+| `main.jac` | Web app entry: serves the page and its endpoints |
+| `frontend.jac` | The page: the four questions, the Generate button, the route card |
+| `planner.jac` | Endpoints the page calls: `plan_run` and `sample_run`, plus the Google Maps link |
+| `routes.jac` | Request validation, the `RouteResult` shape, the ByLLM route call and its output check |
+| `landmarks.jac` | The curated landmark list |
+| `cli.jac` | Command-line preview of the same planner |
 
-Authentication, the web/mobile UI, and save/rate are not implemented yet. See [the development notes](docs/development.md)
-for the next handoff.
+Tests use a mocked LLM, so CI never calls a real model.
+
+Authentication, the mobile UI, and save/rate are not implemented yet. See
+[the development notes](docs/development.md) for the next handoff.
 
 ## Status
 
-Project week 2 (October 7, course week 6): local Jac request prototype ready
-for review. MVP pitch: November 2. Public launch: November 16.
+Course week 8 (October 21): clickable web demo running on a local open-weight
+model. MVP pitch: November 2. Public launch: November 16.
 
 ## Team
 
