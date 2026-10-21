@@ -10,7 +10,8 @@ glob GREEN: str = "#1f6f4a",
 
 def:pub app -> JsxElement {
     has level: str = "beginner",
-        distance: str = "3",
+        distance: str = "2",
+        unit: str = "mi",
         area: str = "central-campus",
         time_of_day: str = "morning",
         notes: str = "",
@@ -20,12 +21,12 @@ def:pub app -> JsxElement {
     async def generate {
         loading = True;
         plan = None;
-        plan = await plan_run(level, distance, area, time_of_day, notes);
+        plan = await plan_run(level, distance, unit, area, time_of_day, notes);
         loading = False;
     }
 
     async def show_example {
-        plan = await sample_run();
+        plan = await sample_run(unit);
     }
 
     label_style = {
@@ -87,16 +88,25 @@ def:pub app -> JsxElement {
                         </select>
                     </div>
                     <div>
-                        <label style={label_style}>Distance (km)</label>
-                        <input
-                            style={field_style}
-                            type="number"
-                            min="0.5"
-                            max="10"
-                            step="0.5"
-                            value={distance}
-                            onChange={lambda (e: ChangeEvent) { distance = e.target.value; }}
-                        />
+                        <label style={label_style}>Distance</label>
+                        <div style={{"display": "flex", "gap": "8px"}}>
+                            <input
+                                style={{** field_style, "flex": "1"}}
+                                type="number"
+                                min="0.3"
+                                step="0.5"
+                                value={distance}
+                                onChange={lambda (e: ChangeEvent) { distance = e.target.value; }}
+                            />
+                            <select
+                                style={{** field_style, "width": "84px"}}
+                                value={unit}
+                                onChange={lambda (e: ChangeEvent) { unit = e.target.value; }}
+                            >
+                                <option value="mi">miles</option>
+                                <option value="km">km</option>
+                            </select>
+                        </div>
                     </div>
                     <div>
                         <label style={label_style}>Area</label>
@@ -213,11 +223,16 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
             </div>;
     }
     dots = "●" * route.difficulty + "○" * (5 - route.difficulty);
-    one_loop = route.distance_km / route.laps if route.laps > 0 else route.distance_km;
+    laps = route.laps if route.laps > 0 else 1;
+    per_unit = 1.0 / 1.609344 if plan.unit == "mi" else 1.0;
+    unit_name = "mi" if plan.unit == "mi" else "km";
+    total = route.distance_km * per_unit;
+    one_loop = total / laps;
+    in_km = f" ({route.distance_km:.1f} km)" if plan.unit == "mi" else "";
     distance_label = (
-        f"≈ {route.distance_km:.1f} km · {route.laps} laps of {one_loop:.1f} km"
-            if route.laps > 1
-            else f"≈ {route.distance_km:.1f} km loop"
+        f"≈ {total:.1f} {unit_name}{in_km} · {laps} laps of {one_loop:.1f} {unit_name}"
+            if laps > 1
+            else f"≈ {total:.1f} {unit_name}{in_km} loop"
     );
     return
         <div style={card_style}>
@@ -320,6 +335,11 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
                         if route.laps > 1
                         else "Open this loop in Google Maps"}
                 </a>
+            }}
+            {if plan.maps_url and route.laps > 1 {
+                <p style={{"margin": "6px 0 0", "fontSize": "13px", "color": MUTED}}>
+                    {f"Google Maps shows one loop. Run it {route.laps} times for the full distance."}
+                </p>
             }}
         </div>;
 }

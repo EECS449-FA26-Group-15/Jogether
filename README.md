@@ -102,9 +102,17 @@ How a route is planned:
 3. The LLM picks the option that best fits the runner's level, time of day and
    own words, then writes the title, a note per stop, the difficulty and the
    safety notes.
-4. The distance on the card comes from step 2, not from the LLM. It is the
-   straight-line distance between stops times 1.3, so it is an estimate; the
-   Google Maps link shows the walking distance of one loop.
+4. The distance on the card comes from step 2, not from the LLM. Leg lengths
+   are real walking distances from the OSRM foot router on OpenStreetMap, so
+   the card agrees with a walking-directions check to within about 0.1 mile.
+   The Google Maps link shows one loop.
+
+The page takes distance in miles or km; it is converted to km for planning.
+
+If the server reports `IndexError` from `get_mtir` right after a fresh start,
+a stale prepared-app snapshot is being reused after a function signature
+changed. Stop the server, delete `.jac/cache/applications`, and run `jac run`
+again.
 
 Each route is checked (known landmarks, 1 to 6 waypoints, difficulty 1-5, at
 most 3 safety notes) and regenerated once if it fails. If both attempts fail, the page says so and

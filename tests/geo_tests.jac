@@ -1,4 +1,4 @@
-import from geo { COORDS, leg_km, loop_km, route_options }
+import from geo { COORDS, WALK_KM, leg_km, loop_km, route_options }
 import from landmarks { landmarks_for }
 
 def names(area: str) -> list[str] {
@@ -32,6 +32,19 @@ test "different distances give different routes" {
     long = route_options(names("central-campus"), 4.5, 1, seed=1)[0];
     assert set(short.stops) != set(long.stops);
     assert long.distance_km > short.distance_km;
+}
+
+test "a 4 mile request is one big loop when the area has one" {
+    for area in ["central-campus", "north-campus", "downtown"] {
+        for option in route_options(names(area), 6.4, 3, seed=1) {
+            assert option.laps <= 2 , f"{area}: {option.laps} laps";
+            assert option.loop_km >= 2.5 , f"{area}: loop only {option.loop_km} km";
+        }
+    }
+}
+
+test "measured walking distances are used when we have them" {
+    assert leg_km("The Diag", "Michigan Union") == WALK_KM["The Diag|Michigan Union"];
 }
 
 test "long runs repeat a loop" {

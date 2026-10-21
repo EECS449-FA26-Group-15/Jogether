@@ -12,14 +12,26 @@ import from routes {
     validate_request
 }
 
-"""What the page shows after the runner taps Generate."""
+glob KM_PER_MILE: float = 1.609344;
+
+"""What the page shows after the runner taps Generate.
+
+Route distances stay in km; `unit` says which unit the runner picked for display.
+"""
 obj RunPlan {
     has accepted: bool,
         errors: list[str],
         route: RouteResult | None = None,
         maps_url: str = "",
         seconds: float = 0.0,
-        is_example: bool = False;
+        is_example: bool = False,
+        unit: str = "km";
+}
+
+"""The distance the runner typed, converted to km; NaN if it is not a number."""
+def to_km(text: str, unit: str) -> float {
+    value = parse_distance(text);
+    return value * KM_PER_MILE if unit == "mi" else value;
 }
 
 """A place Google Maps can find: our coordinates when we have them, else the name."""
@@ -56,8 +68,16 @@ def parse_distance(text: str) -> float {
     }
 }
 
-"""Validation messages use field names; show the labels the runner sees instead."""
-def friendly(error: str) -> str {
+"""Validation messages use field names; show the labels the runner sees instead.
+
+For a runner who picked miles, the distance range is given in miles.
+"""
+def friendly(error: str, unit: str = "km") -> str {
+    if unit == "mi" and error.startswith("distance_km") {
+        low = 0.5 / KM_PER_MILE;
+        high = 10.0 / KM_PER_MILE;
+        return f"Distance must be a number between {low:.1f} and {high:.1f} miles";
+    }
     labels: dict[str, str] = {
         "distance_km": "Distance",
         "time_of_day": "Time of day",
@@ -74,18 +94,23 @@ def friendly(error: str) -> str {
 
 """Validate the four answers, then ask the route agent for a route."""
 def:pub plan_run(
-    level: str, distance_km: str, area: str, time_of_day: str, notes: str
+    level: str, distance: str, unit: str, area: str, time_of_day: str, notes: str
 ) -> RunPlan {
+    unit = "mi" if unit == "mi" else "km";
     request = RunRequest(
         level=level,
-        distance_km=parse_distance(distance_km),
+        distance_km=to_km(distance, unit),
         area=area,
         time_of_day=time_of_day,
         notes=notes.strip()[:300]
     );
     checked = validate_request(request);
     if not checked.accepted {
-        return RunPlan(accepted=False, errors=[friendly(e) for e in checked.errors]);
+        return RunPlan(
+            accepted=False,
+            errors=[friendly(e, unit) for e in checked.errors],
+            unit=unit
+        );
     }
     started = time.time();
     route: RouteResult | None = None;
@@ -99,7 +124,8 @@ def:pub plan_run(
             errors=[
                 f"The route planner is not available right now ({kind}). Is Ollama running?"
             ],
-            seconds=round(time.time() - started, 1)
+            seconds=round(time.time() - started, 1),
+            unit=unit
         );
     }
     seconds = round(time.time() - started, 1);
@@ -109,7 +135,8 @@ def:pub plan_run(
             errors=[
                 "The AI could not produce a route that passed our check. Try again or change your answers."
             ],
-            seconds=seconds
+            seconds=seconds,
+            unit=unit
         );
     }
     return RunPlan(
@@ -117,18 +144,20 @@ def:pub plan_run(
         errors=[],
         route=route,
         maps_url=maps_link(route),
-        seconds=seconds
+        seconds=seconds,
+        unit=unit
     );
 }
 
 """The hand-written example route, clearly marked as not AI-generated."""
-def:pub sample_run -> RunPlan {
+def:pub sample_run(unit: str) -> RunPlan {
     route = example_route();
     return RunPlan(
         accepted=True,
         errors=[],
         route=route,
         maps_url=maps_link(route),
-        is_example=True
+        is_example=True,
+        unit="mi" if unit == "mi" else "km"
     );
 }

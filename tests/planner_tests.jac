@@ -7,7 +7,19 @@ import from routes {
     landmarks_for_time
 }
 import urllib.parse;
-import from planner { friendly, map_point, maps_link, parse_distance }
+import from planner { friendly, map_point, maps_link, parse_distance, to_km }
+
+test "miles are converted to km before planning" {
+    assert abs(to_km("4", "mi") - 6.437) < 0.01;
+    assert to_km("4", "km") == 4.0;
+    assert math.isnan(to_km("four", "mi"));
+}
+
+test "a runner using miles sees the distance range in miles" {
+    message = friendly("distance_km must be finite and between 0.5 and 10 km", "mi");
+    assert "miles" in message;
+    assert "0.3" in message and "6.2" in message;
+}
 
 test "validation messages use the labels shown on the page" {
     assert friendly("distance_km must be finite and between 0.5 and 10 km").startswith(
