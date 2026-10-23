@@ -1,9 +1,9 @@
 [project]
 name = "jogether"
 version = "0.1.0"
-description = "Jogether route request prototype"
+description = "Jogether: an AI running route planner for UMich students"
 entry-point = "main"
-kind = "cli"
+kind = "web-app"
 jac-version = "==0.37.25"
 
 [test]
@@ -11,3 +11,19 @@ directory = "tests"
 
 [byllm.model]
 default_model = "ollama/gemma3:4b"
+
+[dependencies]
+[dependencies.npm]
+react = "^19.2.0"
+react-dom = "^19.2.0"
+react-router-dom = "^6.22.0"
+react-error-boundary = "^5.0.0"
+
+[dependencies.npm.dev]
+vite = "^6.4.1"
+"@vitejs/plugin-react" = "^4.7.0"
+typescript = "^5.3.3"
+"@types/react" = "^19.2.0"
+"@types/react-dom" = "^19.2.0"
+
+[client]

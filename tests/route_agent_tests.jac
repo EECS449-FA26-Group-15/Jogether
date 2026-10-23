@@ -1,6 +1,8 @@
 import from jaclang.byllm.lib { MockLLM }
+import from geo { RouteOption }
 import from routes {
     Landmark,
+    RoutePick,
     RouteResult,
     RunRequest,
     Waypoint,
@@ -34,18 +36,52 @@ test "check rejects unknown landmarks bad difficulty and extra notes" {
     assert len(check_route(route, landmarks_for("central-campus"))) == 3;
 }
 
+def pick(option: int, difficulty: int = 1) -> RoutePick {
+    return RoutePick(
+        option=option,
+        title="Test loop",
+        stops=[Waypoint(name="The Diag", note="Start on the paved square")],
+        difficulty=difficulty,
+        difficulty_reason="flat and short",
+        safety_notes=["Cross at the signals"]
+    );
+}
+
 test "generate retries once and returns the passing route" {
-    mock = MockLLM(outputs=[bad_route(), example_route()]);
-    def plan(request: RunRequest, landmarks: list[Landmark]) -> RouteResult by mock();
-    route = generate_route(campus_request(), plan);
+    mock = MockLLM(outputs=[pick(7), pick(0)]);
+    def plan(
+        request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
+    ) -> RoutePick by mock();
+    route = generate_route(campus_request(), plan, seed=1);
     assert route is not None;
     assert route.difficulty == 1;
+    for w in route.waypoints {
+        assert w.note.strip() != "" , f"{w.name} has no note";
+        if w.name == "The Diag" {
+            assert w.note == "Start on the paved square";
+        }
+    }
     assert "The Diag" in mock.seen_prompts[0];
     assert mock.exhausted();
 }
 
 test "generate gives up after two failed routes" {
-    mock = MockLLM(outputs=[bad_route(), bad_route()]);
-    def plan(request: RunRequest, landmarks: list[Landmark]) -> RouteResult by mock();
-    assert generate_route(campus_request(), plan) is None;
+    mock = MockLLM(outputs=[pick(7), pick(0, difficulty=9)]);
+    def plan(
+        request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
+    ) -> RoutePick by mock();
+    assert generate_route(campus_request(), plan, seed=1) is None;
+}
+
+test "route distance comes from the chosen option, not the LLM" {
+    mock = MockLLM(outputs=[pick(0)]);
+    def plan(
+        request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
+    ) -> RoutePick by mock();
+    request = campus_request();
+    request.distance_km = 4.0;
+    route = generate_route(request, plan, seed=1);
+    assert route is not None;
+    assert 3.0 <= route.distance_km * 1.0 <= 5.0;
+    assert route.laps >= 1;
 }
