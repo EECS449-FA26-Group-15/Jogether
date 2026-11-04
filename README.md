@@ -70,6 +70,19 @@ export PATH="$PWD/.jac/bin:$PATH"
 
 ### Run the web demo
 
+On this Windows checkout, start Ollama, then run `./start-demo.ps1` in
+PowerShell. The launcher uses the pinned Jac compiler through WSL and starts
+the web app in development mode. It copies source into `~/.cache/jogether-demo`
+inside WSL so dependency installation does not suffer from slow Windows-mounted
+filesystem access. Restart the launcher after editing the Windows source.
+Open the localhost URL printed by Jac.
+The model is `gemma3:4b` via Ollama; no cloud API key is required.
+
+The November 4 local integration uses remote `feat/web-demo` at `ca020f2`.
+Previous local source files were backed up to the sibling directory
+`Jogether-backup-20261104`. The older `generate.jac` command remains available
+with `jac run --no-takeover generate.jac --landmarks <file>`.
+
 Route generation runs on [Ollama](https://ollama.com/download) with
 `gemma3:4b` (set in `jac.toml`; the final model is chosen in issue #7).
 No API key is needed:
@@ -175,7 +188,7 @@ Authentication, the mobile UI, and save/rate are not implemented yet. See
 ## Status
 
 Course week 8 (October 21): clickable web demo running on a local open-weight
-model. MVP pitch: November 2. Public launch: November 16.
+model. MVP pitch (Group 15): November 4. Public launch: November 16.
 
 ## Team
 

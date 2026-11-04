@@ -16,17 +16,29 @@ def:pub app -> JsxElement {
         time_of_day: str = "morning",
         notes: str = "",
         loading: bool = False,
-        plan: RunPlan | None = None;
+        plan: RunPlan | None = None,
+        connection_error: str = "";
 
     async def generate {
         loading = True;
         plan = None;
-        plan = await plan_run(level, distance, unit, area, time_of_day, notes);
-        loading = False;
+        connection_error = "";
+        try {
+            plan = await plan_run(level, distance, unit, area, time_of_day, notes);
+        } except Exception {
+            connection_error = "Could not reach the planner. Check your connection and try again.";
+        } finally {
+            loading = False;
+        }
     }
 
     async def show_example {
-        plan = await sample_run(unit);
+        connection_error = "";
+        try {
+            plan = await sample_run(unit);
+        } except Exception {
+            connection_error = "Could not load the example. Please try again.";
+        }
     }
 
     label_style = {
@@ -167,6 +179,9 @@ def:pub app -> JsxElement {
                         else "Generate my route"}
                 </button>
             </div>
+            {if connection_error {
+                <p role="alert" style={{"color": "#a3382a"}}>{connection_error}</p>
+            }}
             {if plan is not None {
                 <RouteCard plan={plan} on_example={show_example}/>
             }}
