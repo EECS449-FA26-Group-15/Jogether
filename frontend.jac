@@ -1,6 +1,6 @@
 """Jogether demo page: four questions in, an AI-planned route out."""
 
-import from planner { RunPlan, plan_run, sample_run }
+import from planner { RunPlan, nearest_start, plan_run, sample_run, start_options }
 
 glob GREEN: str = "#1f6f4a",
      INK: str = "#14342b",
@@ -15,16 +15,48 @@ def:pub app -> JsxElement {
         area: str = "central-campus",
         time_of_day: str = "morning",
         notes: str = "",
+        start: str = "",
+        shape: str = "any",
+        starts: list[str] = [],
+        address: str = "",
+        address_note: str = "",
         loading: bool = False,
         plan: RunPlan | None = None,
         connection_error: str = "";
+
+    async can with [area] entry {
+        try {
+            starts = await start_options(area);
+        } except Exception {
+            starts = [];
+        }
+        start = "";
+    }
+
+    async def find_start {
+        address_note = "Looking up the address...";
+        found = "";
+        try {
+            found = await nearest_start(address);
+        } except Exception {
+            found = "";
+        }
+        if found {
+            start = found;
+            address_note = f"Nearest landmark: {found}";
+        } else {
+            address_note = "No landmark within 2 km of that address. Pick a start from the list.";
+        }
+    }
 
     async def generate {
         loading = True;
         plan = None;
         connection_error = "";
         try {
-            plan = await plan_run(level, distance, unit, area, time_of_day, notes);
+            plan = await plan_run(
+                level, distance, unit, area, time_of_day, notes, start, shape
+            );
         } except Exception {
             connection_error = "Could not reach the planner. Check your connection and try again.";
         } finally {
@@ -144,6 +176,71 @@ def:pub app -> JsxElement {
                             <option value="evening">Evening</option>
                         </select>
                     </div>
+                    <div>
+                        <label style={label_style}>Start from</label>
+                        <select
+                            style={field_style}
+                            value={start}
+                            onChange={lambda (e: ChangeEvent) { start = e.target.value; }}
+                        >
+                            <option value="">Anywhere in this area</option>
+                            {for name in starts {
+                                <option key={name} value={name}>{name}</option>
+                            }}
+                        </select>
+                    </div>
+                    <div>
+                        <label style={label_style}>Route shape</label>
+                        <select
+                            style={field_style}
+                            value={shape}
+                            onChange={lambda (e: ChangeEvent) { shape = e.target.value; }}
+                        >
+                            <option value="any">Any</option>
+                            <option value="loop">Loop (end where you start)</option>
+                            <option value="out-and-back">Out and back</option>
+                            <option value="one-way">One way</option>
+                        </select>
+                    </div>
+                </div>
+                <div style={{"marginTop": "14px"}}>
+                    <label style={label_style}>
+                        Or start near an address (optional)
+                    </label>
+                    <div style={{"display": "flex", "gap": "8px"}}>
+                        <input
+                            style={{** field_style, "flex": "1"}}
+                            type="text"
+                            placeholder="e.g. 500 S State St"
+                            value={address}
+                            onChange={lambda (e: ChangeEvent) { address = e.target.value; }}
+                        />
+                        <button
+                            onClick={find_start}
+                            style={{
+                                "padding": "10px 14px",
+                                "border": f"1px solid {LINE}",
+                                "borderRadius": "10px",
+                                "background": "white",
+                                "color": GREEN,
+                                "fontWeight": "600",
+                                "cursor": "pointer"
+                            }}
+                        >
+                            Find start
+                        </button>
+                    </div>
+                    {if address_note {
+                        <div
+                            style={{
+                                "color": MUTED,
+                                "fontSize": "13px",
+                                "marginTop": "6px"
+                            }}
+                        >
+                            {address_note}
+                        </div>
+                    }}
                 </div>
                 <div style={{"marginTop": "14px"}}>
                     <label style={label_style}>Anything else? (optional)</label>
@@ -244,11 +341,18 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
     total = route.distance_km * per_unit;
     one_loop = total / laps;
     in_km = f" ({route.distance_km:.1f} km)" if plan.unit == "mi" else "";
+    shape_words = {
+        "loop": "loop",
+        "out-and-back": "out and back",
+        "one-way": "one way"
+    };
+    shape_word = shape_words.get(route.shape, "loop");
     distance_label = (
-        f"≈ {total:.1f} {unit_name}{in_km} · {laps} laps of {one_loop:.1f} {unit_name}"
+        f"≈ {total:.1f} {unit_name}{in_km} · {laps} laps of {one_loop:.1f} {unit_name} {shape_word}"
             if laps > 1
-            else f"≈ {total:.1f} {unit_name}{in_km} loop"
+            else f"≈ {total:.1f} {unit_name}{in_km} {shape_word}"
     );
+    climb_label = f"{round(route.climb_m)} m uphill" if route.climb_m > 0 else "flat";
     return
         <div style={card_style}>
             {if plan.is_example {
@@ -295,6 +399,16 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
                     }}
                 >
                     {f"Difficulty {dots} {route.difficulty}/5"}
+                </span>
+                <span
+                    style={{
+                        "background": TINT,
+                        "padding": "6px 10px",
+                        "borderRadius": "999px",
+                        "fontWeight": "600"
+                    }}
+                >
+                    {climb_label}
                 </span>
                 {if not plan.is_example {
                     <span
@@ -346,14 +460,14 @@ def:pub RouteCard(plan: RunPlan, on_example: any) -> JsxElement {
                     rel="noreferrer"
                     style={{"color": GREEN, "fontWeight": "700"}}
                 >
-                    {"Open one loop in Google Maps"
+                    {"Open one pass in Google Maps"
                         if route.laps > 1
-                        else "Open this loop in Google Maps"}
+                        else "Open this route in Google Maps"}
                 </a>
             }}
             {if plan.maps_url and route.laps > 1 {
                 <p style={{"margin": "6px 0 0", "fontSize": "13px", "color": MUTED}}>
-                    {f"Google Maps shows one loop. Run it {route.laps} times for the full distance."}
+                    {f"Google Maps shows one pass. Run it {route.laps} times for the full distance."}
                 </p>
             }}
         </div>;

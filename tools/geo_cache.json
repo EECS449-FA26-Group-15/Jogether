@@ -1,0 +1,140 @@
+{
+ "coords": {
+  "Michigan Stadium": [
+   42.26583,
+   -83.74783
+  ],
+  "Elbel Field": [
+   42.27328,
+   -83.74721
+  ],
+  "Hill Auditorium": [
+   42.27918,
+   -83.73908
+  ],
+  "Michigan League": [
+   42.27935,
+   -83.73771
+  ],
+  "East Quadrangle": [
+   42.27293,
+   -83.73516
+  ],
+  "Island Park": [
+   42.29041,
+   -83.72907
+  ],
+  "Gallup Park": [
+   42.27636,
+   -83.69751
+  ],
+  "Bursley Hall": [
+   42.29381,
+   -83.722
+  ],
+  "Mitchell Field": [
+   42.28569,
+   -83.72172
+  ],
+  "Walgreen Drama Center": [
+   42.29196,
+   -83.71743
+  ],
+  "Earl V. Moore Building": [
+   42.29038,
+   -83.72097
+  ],
+  "Ford Robotics Building": [
+   42.29459,
+   -83.70941
+  ],
+  "Bandemer Park": [
+   42.29845,
+   -83.74326
+  ],
+  "Argo Cascades": [
+   42.29065,
+   -83.74289
+  ],
+  "Michigan Theater": [
+   42.27949,
+   -83.74175
+  ],
+  "Allmendinger Park": [
+   42.26748,
+   -83.75585
+  ],
+  "Burns Park": [
+   42.26747,
+   -83.73043
+  ],
+  "Veterans Memorial Park": [
+   42.28301,
+   -83.77796
+  ],
+  "Nickels Arcade": [
+   42.27836,
+   -83.74139
+  ],
+  "Ann Arbor Train Station": [
+   42.28779,
+   -83.74319
+  ],
+  "Central Campus Recreation Building": [
+   42.2781,
+   -83.73278
+  ],
+  "Baits Houses": [
+   42.29402,
+   -83.72397
+  ]
+ },
+ "elev": {
+  "The Diag": 273.0,
+  "Michigan Union": 272.0,
+  "Ingalls Mall": 272.0,
+  "Burton Memorial Tower": 273.0,
+  "Law Quadrangle": 269.0,
+  "Observatory Street": 275.0,
+  "Palmer Field": 264.0,
+  "Nichols Arboretum": 260.0,
+  "Michigan Stadium": 265.0,
+  "Elbel Field": 248.0,
+  "Hill Auditorium": 273.0,
+  "Michigan League": 272.0,
+  "East Quadrangle": 269.0,
+  "Island Park": 234.0,
+  "Gallup Park": 229.0,
+  "Pierpont Commons": 261.0,
+  "Duderstadt Center": 262.0,
+  "Lurie Tower": 263.0,
+  "Wave Field": 271.0,
+  "Bonisteel Boulevard": 262.0,
+  "North Campus Recreation Building": 284.0,
+  "Gerald R. Ford Presidential Library": 259.0,
+  "Fuller Park": 233.0,
+  "Bursley Hall": 284.0,
+  "Mitchell Field": 234.0,
+  "Walgreen Drama Center": 260.0,
+  "Earl V. Moore Building": 265.0,
+  "Ford Robotics Building": 279.0,
+  "Main Street": 260.0,
+  "Kerrytown": 252.0,
+  "Ann Arbor Farmers Market": 253.0,
+  "Liberty Plaza": 264.0,
+  "Ann Arbor District Library": 263.0,
+  "Wheeler Park": 236.0,
+  "Argo Park": 236.0,
+  "West Park": 250.0,
+  "Bandemer Park": 247.0,
+  "Argo Cascades": 239.0,
+  "Michigan Theater": 267.0,
+  "Allmendinger Park": 282.0,
+  "Burns Park": 265.0,
+  "Veterans Memorial Park": 275.0,
+  "Nickels Arcade": 272.0,
+  "Ann Arbor Train Station": 236.0,
+  "Central Campus Recreation Building": 272.0,
+  "Baits Houses": 289.0
+ }
+}

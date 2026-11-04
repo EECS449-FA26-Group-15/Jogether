@@ -1,9 +1,12 @@
 """Server endpoints the web page calls: plan a run, or fetch the example route."""
 
+import json;
 import time;
 import traceback;
 import urllib.parse;
-import from geo { COORDS }
+import urllib.request;
+import from geo { COORDS, straight_km_points }
+import from landmarks { all_landmarks, landmarks_for }
 import from routes {
     RouteResult,
     RunRequest,
@@ -43,20 +46,84 @@ def map_point(name: str) -> str {
     return f"{name}, Ann Arbor, MI";
 }
 
-"""Google Maps walking directions for one loop: through every waypoint and back to the start."""
+"""Google Maps walking directions for one pass of the route.
+
+A loop goes through every waypoint and back to the start. Out-and-back and
+one-way routes are shown from the first stop to the last; the card says how to
+get back.
+"""
 def maps_link(route: RouteResult) -> str {
     stops = [map_point(w.name) for w in route.waypoints];
     if len(stops) < 2 {
         return "";
     }
+    closed = route.shape == "loop";
     params: dict[str, str] = {
         "api": "1",
         "origin": stops[0],
-        "destination": stops[0],
-        "waypoints": "|".join(stops[1:]),
+        "destination": stops[0] if closed else stops[-1],
+        "waypoints": "|".join(stops[1:] if closed else stops[1:-1]),
         "travelmode": "walking"
     };
+    if params["waypoints"] == "" {
+        del params["waypoints"];
+    }
     return "https://www.google.com/maps/dir/?" + urllib.parse.urlencode(params);
+}
+
+"""Landmark names a runner can start from in this area."""
+def:pub start_options(area: str) -> list[str] {
+    return [lm.name for lm in landmarks_for(area)];
+}
+
+"""The landmark nearest to a typed address in Ann Arbor, or "" when none is within 2 km.
+
+Uses OpenStreetMap Nominatim, so it needs the network; any failure returns "".
+"""
+def:pub nearest_start(address: str) -> str {
+    text = address.strip()[:200];
+    if text == "" {
+        return "";
+    }
+    query = text if "ann arbor" in text.lower() else f"{text}, Ann Arbor, Michigan";
+    url = "https://nominatim.openstreetmap.org/search?"
+        + urllib.parse.urlencode(
+            {"q": query, "format": "json", "limit": 1, "countrycodes": "us"}
+        );
+    try {
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Jogether-course-project/0.2 (EECS 449, UMich)"}
+        );
+        with urllib.request.urlopen(req, timeout=10) as resp {
+            hits = json.load(resp);
+        }
+    } except Exception {
+        return "";
+    }
+    if len(hits) == 0 {
+        return "";
+    }
+    lat = float(hits[0]["lat"]);
+    lon = float(hits[0]["lon"]);
+    return nearest_landmark(lat, lon);
+}
+
+"""Name of the landmark closest to a coordinate, or "" when none is within 2 km."""
+def nearest_landmark(lat: float, lon: float) -> str {
+    best = "";
+    best_km = 2.0;
+    for lm in all_landmarks() {
+        if lm.name not in COORDS {
+            continue;
+        }
+        (plat, plon) = COORDS[lm.name];
+        d = straight_km_points(lat, lon, plat, plon);
+        if d < best_km {
+            best = lm.name;
+            best_km = d;
+        }
+    }
+    return best;
 }
 
 """Turn the distance text from the form into a number; NaN fails validation."""
@@ -94,7 +161,14 @@ def friendly(error: str, unit: str = "km") -> str {
 
 """Validate the four answers, then ask the route agent for a route."""
 def:pub plan_run(
-    level: str, distance: str, unit: str, area: str, time_of_day: str, notes: str
+    level: str,
+    distance: str,
+    unit: str,
+    area: str,
+    time_of_day: str,
+    notes: str,
+    start: str = "",
+    shape: str = "any"
 ) -> RunPlan {
     unit = "mi" if unit == "mi" else "km";
     request = RunRequest(
@@ -102,7 +176,9 @@ def:pub plan_run(
         distance_km=to_km(distance, unit),
         area=area,
         time_of_day=time_of_day,
-        notes=notes.strip()[:300]
+        notes=notes.strip()[:300],
+        start=start.strip(),
+        shape=shape.strip() or "any"
     );
     checked = validate_request(request);
     if not checked.accepted {

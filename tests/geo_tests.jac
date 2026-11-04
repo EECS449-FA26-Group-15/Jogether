@@ -1,5 +1,14 @@
-import from geo { COORDS, WALK_KM, leg_km, loop_km, route_options }
-import from landmarks { landmarks_for }
+import from geo {
+    COORDS,
+    RouteOption,
+    WALK_KM,
+    climb_m,
+    leg_km,
+    loop_km,
+    path_km,
+    route_options
+}
+import from landmarks { all_landmarks, landmarks_for }
 
 def names(area: str) -> list[str] {
     return [lm.name for lm in landmarks_for(area)];
@@ -47,10 +56,84 @@ test "measured walking distances are used when we have them" {
     assert leg_km("The Diag", "Michigan Union") == WALK_KM["The Diag|Michigan Union"];
 }
 
-test "long runs repeat a loop" {
-    option = route_options(names("downtown"), 10.0, 1, seed=1)[0];
+test "a long run in a big enough pool needs no laps" {
+    everything = [lm.name for lm in all_landmarks()];
+    for option in route_options(everything, 10.0, 3, seed=1, start="Main Street") {
+        assert option.laps == 1 , f"{option.laps} laps";
+        assert abs(option.distance_km - 10.0) <= 1.0;
+    }
+}
+
+test "laps are only a fallback and still measure correctly" {
+    option = route_options(names("downtown")[:5], 10.0, 1, seed=1)[0];
     assert option.laps >= 2;
     assert abs(option.distance_km - option.loop_km * option.laps) < 0.2;
+}
+
+test "a chosen start is the first stop of every option" {
+    for option in route_options(
+        names("central-campus"), 3.0, 3, seed=1, start="The Diag"
+    ) {
+        assert option.stops[0] == "The Diag";
+    }
+}
+
+test "an unknown start gives no options" {
+    assert route_options(names("central-campus"), 3.0, 3, start="Nowhere") == [];
+}
+
+test "shape filter is respected" {
+    for shape in ["loop", "out-and-back", "one-way"] {
+        options = route_options(names("downtown"), 3.0, 3, seed=1, shape=shape);
+        assert len(options) > 0;
+        for option in options {
+            assert option.shape == shape;
+        }
+    }
+}
+
+test "out-and-back is twice the path and one-way is the path" {
+    stops = ["The Diag", "Michigan Union", "Law Quadrangle"];
+    assert abs(
+        path_km(stops) - (leg_km(stops[0], stops[1]) + leg_km(stops[1], stops[2]))
+    )
+        < 1e-9;
+    back = route_options(
+        stops, 2 * path_km(stops), 1, shape="out-and-back", start="The Diag"
+    )[0];
+    assert abs(back.loop_km - 2 * path_km(back.stops)) < 0.02;
+    one = route_options(stops, path_km(stops), 1, shape="one-way", start="The Diag")[0];
+    assert abs(one.loop_km - path_km(one.stops)) < 0.02;
+    assert one.laps == 1;
+}
+
+test "preference bonus pulls wanted landmarks into the route" {
+    bonus = {"Argo Park": 2.0, "Bandemer Park": 2.0, "Argo Cascades": 2.0};
+    plain = route_options(names("downtown"), 3.0, 3, seed=1, start="Main Street");
+    river = route_options(
+        names("downtown"), 3.0, 3, seed=1, start="Main Street", bonus=bonus
+    );
+    def river_stops(options: list[RouteOption]) -> int {
+        return sum(
+            [
+                len(
+                    [
+                        s
+                        for s in o.stops
+                        if s in bonus
+                    ]
+                ) for o in options
+            ]
+        );
+    }
+    assert river_stops(river) > river_stops(plain);
+}
+
+test "climb is measured from elevation and penalised when asked" {
+    assert climb_m(["Nichols Arboretum", "Observatory Street"], False) > 0;
+    flat = route_options(names("central-campus"), 3.0, 1, seed=1, climb_weight=2.0)[0];
+    hilly = route_options(names("central-campus"), 3.0, 1, seed=1, climb_weight=0.0)[0];
+    assert flat.climb_m <= hilly.climb_m;
 }
 
 test "options use different sets of stops" {

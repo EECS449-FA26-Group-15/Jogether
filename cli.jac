@@ -23,13 +23,19 @@ with entry {
     parser.add_argument("--distance-km", type=float, `default=2.0);
     parser.add_argument("--area", `default="central-campus");
     parser.add_argument("--time-of-day", `default="morning");
+    parser.add_argument("--start", `default="");
+    parser.add_argument("--shape", `default="any");
+    parser.add_argument("--notes", `default="");
     parser.add_argument("--generate", action="store_true");
     args = parser.parse_args();
     request = RunRequest(
         level=args.level,
         distance_km=args.distance_km,
         area=args.area,
-        time_of_day=args.time_of_day
+        time_of_day=args.time_of_day,
+        notes=args.notes,
+        start=args.start,
+        shape=args.shape
     );
     result = validate_request(request);
     route = generate_route(request) if result.accepted and args.generate else None;
