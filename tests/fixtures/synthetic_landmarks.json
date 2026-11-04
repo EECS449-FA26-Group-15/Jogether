@@ -1,0 +1,7 @@
+{
+  "central-campus": [
+    {"name": "TEST Gate", "description": "Fictional entrance for integration testing only", "lighting": "unknown", "surface": "flat paved path", "good_time_of_day": "morning"},
+    {"name": "TEST Garden", "description": "Fictional garden for integration testing only", "lighting": "unknown", "surface": "flat gravel path", "good_time_of_day": "morning"},
+    {"name": "TEST Field", "description": "Fictional field for integration testing only", "lighting": "unknown", "surface": "flat paved path", "good_time_of_day": "afternoon"}
+  ]
+}
