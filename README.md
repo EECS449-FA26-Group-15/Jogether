@@ -106,19 +106,35 @@ NODE_OPTIONS="--dns-result-order=ipv4first" npm install --prefix .jac/client
 
 How a route is planned:
 
-1. Code keeps the landmarks in the chosen area that suit the time of day, and
-   drops dirt trails for beginners.
-2. Code builds loops of 3 to 6 of those landmarks from their coordinates
-   (`geo.jac`) and measures each one. When the area is too small for the
-   requested distance, a loop is repeated for 2 to 4 laps. The 3 loops closest
-   to the requested distance become the options.
-3. The LLM picks the option that best fits the runner's level, time of day and
+1. If the runner wrote a note, one LLM call turns it into structured
+   preferences: wanted and avoided landmark tags (river, park, quiet, ...),
+   "avoid hills", and a route shape. Empty notes skip this call.
+2. Code builds the landmark pool: the chosen area's landmarks plus any landmark
+   from a neighbouring area within reach of the requested distance, filtered
+   for the time of day, with dirt trails dropped for beginners. The chosen
+   start landmark is always in the pool.
+3. Code measures candidate routes from that pool (`geo.jac`) in three shapes:
+   a loop back to the start, an out-and-back, or a one-way run that ends
+   elsewhere. Each candidate is scored on distance, uphill metres, matched
+   preferences and shape; repeating a loop for laps is only a fallback and is
+   penalised. The 3 best candidates with different stops become the options.
+4. The LLM picks the option that best fits the runner's level, time of day and
    own words, then writes the title, a note per stop, the difficulty and the
    safety notes.
-4. The distance on the card comes from step 2, not from the LLM. Leg lengths
-   are real walking distances from the OSRM foot router on OpenStreetMap, so
-   the card agrees with a walking-directions check to within about 0.1 mile.
-   The Google Maps link shows one loop.
+5. The distance and climb on the card come from step 3, not from the LLM. Leg
+   lengths are real walking distances from the OSRM foot router on
+   OpenStreetMap, elevation is from Open-Meteo, so the card agrees with a
+   walking-directions check to within about 0.1 mile. The Google Maps link
+   shows one pass of the route.
+
+The start can be picked from the area's landmarks, or typed as an address: the
+page asks OpenStreetMap Nominatim for the coordinates and uses the nearest
+landmark within 2 km. That lookup is the only feature that needs the network
+at run time.
+
+Landmark data (46 landmarks across the three areas, coordinates, 1035 walking
+distances, elevations) is generated: edit `tools/landmark_seed.py`, then run
+`python3 tools/build_geo.py` to rewrite `landmarks.jac` and `geo_data.jac`.
 
 The page takes distance in miles or km; it is converted to km for planning.
 
@@ -157,6 +173,8 @@ Initial prototype options:
 - Distance: finite number from 0.5 to 10 km, including both boundaries
 - Area: `central-campus`, `north-campus`, `downtown`
 - Time: `morning`, `afternoon`, `evening`
+- Start (optional): the exact name of a landmark from `landmarks.jac`
+- Shape (optional): `any`, `loop`, `out-and-back`, `one-way`
 
 These options and bounds are initial product assumptions, not verified route
 coverage, a medical recommendation, or a safety guarantee. Keep the form in
