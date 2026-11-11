@@ -1,9 +1,9 @@
 import from landmarks { landmarks_for }
 import from routes { example_route }
 
-test "each area has 8 to 10 landmarks" {
+test "each area has 14 to 20 landmarks" {
     for area in ["central-campus", "north-campus", "downtown"] {
-        assert 8 <= len(landmarks_for(area)) <= 10;
+        assert 14 <= len(landmarks_for(area)) <= 20;
     }
 }
 
