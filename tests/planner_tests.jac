@@ -8,6 +8,8 @@ import from routes {
 }
 import urllib.parse;
 import from planner {
+    GeoResult,
+    address_queries,
     friendly,
     map_point,
     maps_link,
@@ -80,16 +82,20 @@ test "distance text parses to a number or NaN" {
     assert math.isnan(parse_distance("abc"));
 }
 
-def at_diag(address: str) -> tuple[float, float] | None {
-    return (42.2771, -83.73801);
+def at_diag(address: str) -> GeoResult {
+    return GeoResult(found=True, lat=42.2771, lon=-83.73801, place="State Street");
 }
 
-def nowhere(address: str) -> tuple[float, float] | None {
-    return None;
+def nowhere(address: str) -> GeoResult {
+    return GeoResult(found=False, reachable=True);
 }
 
-def in_detroit(address: str) -> tuple[float, float] | None {
-    return (42.3314, -83.0458);
+def offline(address: str) -> GeoResult {
+    return GeoResult(found=False, reachable=False);
+}
+
+def in_detroit(address: str) -> GeoResult {
+    return GeoResult(found=True, lat=42.3314, lon=-83.0458, place="Woodward Avenue");
 }
 
 test "an empty address means no fixed start and no error" {
@@ -101,6 +107,7 @@ test "an address becomes the nearest landmark and its area" {
     found = start_for_address("500 S State St", at_diag);
     assert found.landmark == "The Diag";
     assert found.area == "central-campus";
+    assert found.place == "State Street";
     assert found.error == "";
 }
 
@@ -110,8 +117,31 @@ test "an address that cannot be found explains itself" {
     assert "Nowhere Lane" in found.error;
 }
 
+test "an unreachable lookup service is reported, not blamed on the address" {
+    found = start_for_address("500 S State St", offline);
+    assert found.landmark == "";
+    assert "reach" in found.error;
+}
+
 test "an address far from every landmark explains itself" {
     found = start_for_address("Detroit", in_detroit);
     assert found.landmark == "";
     assert "2 km" in found.error;
+    assert "Woodward Avenue" in found.error;
+}
+
+test "address retries drop trailing street words, then the house number" {
+    assert address_queries("1719 Hideaway Ln Dr")
+        == [
+            "1719 Hideaway Ln Dr",
+            "1719 Hideaway Ln",
+            "1719 Hideaway",
+            "Hideaway Ln Dr",
+            "Hideaway Ln",
+            "Hideaway"
+        ];
+    assert address_queries("500 S State St, Ann Arbor")
+        == ["500 S State St Ann Arbor", "S State St Ann Arbor"];
+    assert address_queries("Michigan Union") == ["Michigan Union"];
+    assert address_queries("") == [];
 }

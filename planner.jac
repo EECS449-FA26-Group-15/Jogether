@@ -45,14 +45,65 @@ obj RunPlan {
         unit: str = "km";
 }
 
-"""How a typed address became a start: the landmark and its area, or why not."""
+"""How a typed address became a start: the landmark and its area, or why not.
+
+`place` is the name of what the address lookup found, for the note on the page.
+"""
 obj StartMatch {
     has landmark: str = "",
         area: str = "",
+        place: str = "",
         error: str = "";
 }
 
-glob Geocoder = Callable[[str], tuple[float, float] | None];
+"""What the address lookup gave back.
+
+`reachable` is False when the lookup service could not be reached at all, so
+the page can say so instead of blaming the address.
+"""
+obj GeoResult {
+    has found: bool = False,
+        reachable: bool = True,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        place: str = "";
+}
+
+glob Geocoder = Callable[[str], GeoResult];
+
+"""Street words people add after a name, which are dropped one at a time on retry."""
+glob STREET_WORDS: list[str] = [
+         "dr",
+         "drive",
+         "st",
+         "street",
+         "ave",
+         "avenue",
+         "rd",
+         "road",
+         "ln",
+         "lane",
+         "blvd",
+         "boulevard",
+         "ct",
+         "court",
+         "pl",
+         "place",
+         "way",
+         "cir",
+         "circle",
+         "ter",
+         "terrace",
+         "trl",
+         "trail",
+         "pkwy",
+         "parkway",
+         "hwy",
+         "highway"
+     ],
+     MAX_ADDRESS_QUERIES: int = 6,
+     NOMINATIM_PAUSE_S: float = 1.0,
+     ANN_ARBOR_VIEWBOX: str = "-83.82,42.34,-83.62,42.20";
 
 """The distance the runner typed, converted to km; NaN if it is not a number."""
 def to_km(text: str, unit: str) -> float {
@@ -94,34 +145,99 @@ def maps_link(route: RouteResult) -> str {
     return "https://www.google.com/maps/dir/?" + urllib.parse.urlencode(params);
 }
 
-"""Coordinates of a typed address in Ann Arbor, or None when nothing is found.
+"""The queries to try for a typed address, most specific first.
 
-Uses OpenStreetMap Nominatim, so it needs the network; any failure gives None.
+People type extra street words ("Hideaway Ln Dr") or house numbers the map
+does not know. Each later query drops one trailing street word, and the second
+half of the list drops the house number too, so the street itself can still be
+found: "1719 Hideaway Ln Dr" tries "1719 Hideaway Ln", "1719 Hideaway",
+"Hideaway Ln Dr", "Hideaway Ln", "Hideaway".
 """
-def geocode(address: str) -> tuple[float, float] | None {
-    text = address.strip()[:200];
-    if text == "" {
-        return None;
+def address_queries(text: str) -> list[str] {
+    words = [
+        w
+        for w in text.replace(",", " ").split()
+        if w != ""
+    ];
+    queries: list[str] = [];
+    bases = [words];
+    if len(words) > 1 and words[0].isdigit() {
+        bases.append(words[1:]);
     }
-    query = text if "ann arbor" in text.lower() else f"{text}, Ann Arbor, Michigan";
+    for base in bases {
+        current = list(base);
+        while len(current) > 0 {
+            query = " ".join(current);
+            if query not in queries {
+                queries.append(query);
+            }
+            if len(current) > 1 and current[-1].lower().rstrip(".") in STREET_WORDS {
+                current = current[:-1];
+            } else {
+                break;
+            }
+        }
+    }
+    return queries[:MAX_ADDRESS_QUERIES];
+}
+
+"""One Nominatim search limited to the Ann Arbor area; raises when unreachable."""
+def nominatim_search(query: str) -> list[dict[str, any]] {
+    text = query if "ann arbor" in query.lower() else f"{query}, Ann Arbor, Michigan";
     url = "https://nominatim.openstreetmap.org/search?"
         + urllib.parse.urlencode(
-            {"q": query, "format": "json", "limit": 1, "countrycodes": "us"}
+            {
+                "q": text,
+                "format": "json",
+                "limit": 1,
+                "countrycodes": "us",
+                "viewbox": ANN_ARBOR_VIEWBOX,
+                "bounded": 1
+            }
         );
-    try {
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "Jogether-course-project/0.3 (EECS 449, UMich)"}
-        );
-        with urllib.request.urlopen(req, timeout=10) as resp {
-            hits = json.load(resp);
-        }
-        if len(hits) == 0 {
-            return None;
-        }
-        return (float(hits[0]["lat"]), float(hits[0]["lon"]));
-    } except Exception {
-        return None;
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Jogether-course-project/0.3 (EECS 449, UMich)"}
+    );
+    with urllib.request.urlopen(req, timeout=10) as resp {
+        hits = json.load(resp);
     }
+    return hits;
+}
+
+"""Where a typed address is, from OpenStreetMap Nominatim.
+
+Tries the address as typed, then shorter forms of it (see `address_queries`),
+pausing between calls as Nominatim's usage policy asks. Needs the network.
+"""
+def geocode(address: str) -> GeoResult {
+    text = address.strip()[:200];
+    if text == "" {
+        return GeoResult();
+    }
+    reachable = False;
+    for (i, query) in enumerate(address_queries(text)) {
+        if i > 0 {
+            time.sleep(NOMINATIM_PAUSE_S);
+        }
+        try {
+            hits = nominatim_search(query);
+        } except Exception {
+            continue;
+        }
+        reachable = True;
+        if len(hits) == 0 {
+            continue;
+        }
+        place = str(hits[0].get("display_name", query)).split(",")[0].strip() or query;
+        return GeoResult(
+            found=True,
+            reachable=True,
+            lat=float(hits[0]["lat"]),
+            lon=float(hits[0]["lon"]),
+            place=place
+        );
+    }
+    return GeoResult(found=False, reachable=reachable);
 }
 
 """Name of the landmark closest to a coordinate, or "" when none is within 2 km."""
@@ -153,20 +269,27 @@ def start_for_address(address: str, geocoder: Geocoder = geocode) -> StartMatch 
         return StartMatch();
     }
     found = geocoder(text);
-    if found is None {
+    if not found.reachable {
         return StartMatch(
-            error=f'We could not find "{text}" in Ann Arbor. Check the address and your connection, or leave the start blank.'
+            error="We could not reach the address lookup service (OpenStreetMap Nominatim). Check your connection, or leave the start blank."
         );
     }
-    name = nearest_landmark(found[0], found[1]);
+    if not found.found {
+        return StartMatch(
+            error=f'We could not find "{text}" in Ann Arbor. Try the street name with its number, like "500 S State St", or leave the start blank.'
+        );
+    }
+    name = nearest_landmark(found.lat, found.lon);
     if name == "" {
         return StartMatch(
-            error=f'No landmark within 2 km of "{text}". Try an address closer to campus or downtown, or leave the start blank.'
+            error=f'No landmark within 2 km of "{found.place}". Try an address closer to campus or downtown, or leave the start blank.'
         );
     }
     landmark = landmark_named(name);
     return StartMatch(
-        landmark=name, area=landmark.area if landmark is not None else ""
+        landmark=name,
+        area=landmark.area if landmark is not None else "",
+        place=found.place
     );
 }
 
@@ -228,13 +351,14 @@ def:pub plan_run(
             return RunPlan(accepted=False, errors=[matched.error], unit=unit);
         }
         start = matched.landmark;
+        place = matched.place if matched.place != "" else "your address";
         if matched.area != "" and matched.area != area {
             area = matched.area;
-            start_note = f"Your address is nearest to {start} ({AREA_NAMES.get(
+            start_note = f"{place} is nearest to {start} ({AREA_NAMES.get(
                 area, area
             )}), so the routes start there.";
         } else {
-            start_note = f"Routes start at {start}, the landmark nearest to your address.";
+            start_note = f"Routes start at {start}, the landmark nearest to {place}.";
         }
     }
     request = RunRequest(
