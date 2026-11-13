@@ -7,6 +7,7 @@ import from routes {
     RoutePick,
     RunRequest,
     Waypoint,
+    code_difficulty,
     generate_routes,
     landmarks_for_request,
     options_for,
@@ -51,14 +52,49 @@ test "valid routes keep one route per option in the picks' order" {
     assert [w.name for w in routes[1].waypoints] == options[0].stops;
 }
 
-test "a pick that fails the check is dropped" {
+test "a pick whose title names a place off the route is dropped" {
     req = request();
     landmarks = landmarks_for_request(req);
     options = options_for(req, landmarks, Preferences(), 1);
-    bad = pick(0);
-    bad.difficulty = 9;
-    assert valid_routes([bad, pick(1)], options, landmarks)[0].difficulty == 2;
+    off_route = [
+        lm.name
+        for lm in landmarks
+        if lm.name not in options[0].stops
+    ][0];
+    bad = pick(0, f"Sprint to {off_route}");
+    assert valid_routes([bad, pick(1)], options, landmarks)[0].title == "Morning run";
     assert len(valid_routes([bad], options, landmarks)) == 0;
+}
+
+test "an out-of-range difficulty is replaced by the code estimate, extra safety notes are cut" {
+    req = request();
+    landmarks = landmarks_for_request(req);
+    options = options_for(req, landmarks, Preferences(), 1);
+    wild = pick(0);
+    wild.difficulty = 9;
+    wild.safety_notes = ["one", "two", "three", "four"];
+    tame = pick(1);
+    tame.difficulty = 0;
+    routes = valid_routes([wild, tame], options, landmarks, "beginner");
+    assert len(routes) == 2;
+    assert routes[0].difficulty == code_difficulty(options[0], "beginner");
+    assert 1 <= routes[0].difficulty <= 3;
+    assert routes[0].safety_notes == ["one", "two", "three"];
+    assert routes[1].difficulty == code_difficulty(options[1], "beginner");
+}
+
+test "the code estimate grows with distance and climb and drops with experience" {
+    short = RouteOption(stops=["a", "b", "c"], laps=1, loop_km=2.0, distance_km=2.0);
+    long = RouteOption(stops=["a", "b", "c"], laps=1, loop_km=9.5, distance_km=9.5);
+    hilly = RouteOption(
+        stops=["a", "b", "c"], laps=1, loop_km=5.0, distance_km=5.0, climb_m=95.0
+    );
+    assert code_difficulty(short, "beginner") == 1;
+    assert code_difficulty(long, "beginner") == 5;
+    assert code_difficulty(hilly, "beginner") == 5;
+    assert code_difficulty(hilly, "intermediate") == 4;
+    assert code_difficulty(hilly, "experienced") == 4;
+    assert code_difficulty(short, "experienced") == 1;
 }
 
 test "three routes come back from one mocked call, all starting at the chosen start" {

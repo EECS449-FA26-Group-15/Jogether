@@ -266,12 +266,22 @@ Notes are matched to stops by name, so a note can never land on the wrong stop.
 A stop the LLM did not describe gets its landmark description instead.
 """
 def build_route(
-    pick: RoutePick, options: list[RouteOption], landmarks: list[Landmark]
+    pick: RoutePick,
+    options: list[RouteOption],
+    landmarks: list[Landmark],
+    level: str = "intermediate"
 ) -> RouteResult | None {
     if not (0 <= pick.option < len(options)) {
         return None;
     }
     chosen = options[pick.option];
+    difficulty = pick.difficulty;
+    if not (1 <= difficulty <= 5) {
+        difficulty = code_difficulty(chosen, level);
+        print(
+            f"difficulty {pick.difficulty} from the model replaced by the code estimate {difficulty} ({pick.title})"
+        );
+    }
     written = {
         w.name: w.note
         for w in pick.stops
@@ -286,13 +296,42 @@ def build_route(
         title=pick.title,
         waypoints=waypoints,
         distance_km=chosen.distance_km,
-        difficulty=pick.difficulty,
+        difficulty=difficulty,
         difficulty_reason=pick.difficulty_reason,
-        safety_notes=pick.safety_notes,
+        safety_notes=pick.safety_notes[:3],
         laps=chosen.laps,
         shape=chosen.shape,
         climb_m=chosen.climb_m
     );
+}
+
+"""Difficulty 1 (easiest) to 5 estimated by code from a measured option.
+
+Used when the model's rating is outside 1 to 5: distance adds a point at
+2.5, 4.5, 7 and 9 km, uphill at 40 and 90 m, more than two laps one more;
+intermediate runners knock one point off a rating of 3 or more and
+experienced runners always one.
+"""
+def code_difficulty(option: RouteOption, level: str) -> int {
+    score = 1;
+    for step in [2.5, 4.5, 7.0, 9.0] {
+        if option.distance_km >= step {
+            score += 1;
+        }
+    }
+    if option.climb_m >= 40 {
+        score += 1;
+    }
+    if option.climb_m >= 90 {
+        score += 1;
+    }
+    if option.laps > 2 {
+        score += 1;
+    }
+    if level == "experienced" or (level == "intermediate" and score >= 3) {
+        score -= 1;
+    }
+    return min(5, max(1, score));
 }
 
 """Return problems with a generated route; an empty list means it passes."""
@@ -450,7 +489,7 @@ def generate_route(
     }
     for _ in range(2) {
         pick = planner(request, landmarks, options);
-        route = build_route(pick, options, landmarks);
+        route = build_route(pick, options, landmarks, request.level);
         if route is not None and check_route(route, landmarks) == [] {
             return route;
         }
@@ -464,16 +503,28 @@ A pick that names a missing option, repeats an option already used, or fails
 the check is dropped.
 """
 def valid_routes(
-    picks: list[RoutePick], options: list[RouteOption], landmarks: list[Landmark]
+    picks: list[RoutePick],
+    options: list[RouteOption],
+    landmarks: list[Landmark],
+    level: str = "intermediate"
 ) -> list[RouteResult] {
     routes: list[RouteResult] = [];
     used: list[int] = [];
     for pick in picks {
         if pick.option in used {
+            print(
+                f"route pick dropped: option {pick.option} already used ({pick.title})"
+            );
             continue;
         }
-        route = build_route(pick, options, landmarks);
-        if route is None or check_route(route, landmarks) != [] {
+        route = build_route(pick, options, landmarks, level);
+        if route is None {
+            print(f"route pick dropped: no option {pick.option} ({pick.title})");
+            continue;
+        }
+        problems = check_route(route, landmarks);
+        if problems != [] {
+            print(f"route pick dropped: {'; '.join(problems)} ({pick.title})");
             continue;
         }
         used.append(pick.option);
@@ -502,7 +553,7 @@ def generate_routes(
     }
     for _ in range(2) {
         choices = planner(request, landmarks, options);
-        routes = valid_routes(choices.picks, options, landmarks);
+        routes = valid_routes(choices.picks, options, landmarks, request.level);
         if len(routes) > 0 {
             return routes;
         }
