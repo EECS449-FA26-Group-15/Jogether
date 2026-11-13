@@ -26,8 +26,12 @@
 
 - Three routes, map and address (branch `feat/three-routes-map-address`,
   November 13): the page no longer has a start landmark menu. A typed address
-  goes to Nominatim, the nearest landmark within 2 km becomes the start, and
-  the area follows that landmark (`start_for_address` in `planner.jac`). One
+  is looked up (US Census geocoder for the house number, then Nominatim with
+  shorter forms of the address) and becomes a place of its own that routes
+  start from, with walking distances from one OSRM table call and elevation
+  from Open-Meteo; it must be within 2 km of a landmark, whose area is used
+  (`start_for_address` and `register_start` in `planner.jac`,
+  `known_landmark` in `routes.jac`, `add_place` in `geo.jac`). One
   ByLLM call, `plan_routes`, describes all three measured options; picks that
   fail the check are dropped (`generate_routes` in `routes.jac`). `maps.jac`
   computes, on the server, the OpenStreetMap tiles and the OSRM walking path

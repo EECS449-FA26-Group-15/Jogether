@@ -196,7 +196,7 @@ def:pub app -> JsxElement {
                             "color": MUTED
                         }}
                     >
-                        With an address, the routes start at the nearest landmark. Leave it blank to start anywhere in the area.
+                        With an address, the routes start right there. Leave it blank to start anywhere in the area.
                     </p>
                     <div style={{"marginTop": "14px"}}>
                         <label style={label_style}>Anything else? (optional)</label>

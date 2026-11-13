@@ -46,6 +46,22 @@ glob LEVELS: list[str] = ["beginner", "intermediate", "experienced"],
      TIMES: list[str] = ["morning", "afternoon", "evening"],
      SHAPE_CHOICES: list[str] = ["any"] + SHAPES;
 
+"""Landmarks added while the server runs (a runner's own start address), by name."""
+glob RUNTIME_LANDMARKS: dict[str, Landmark] = {};
+
+"""Make a place the planner can start from; its coordinates go to geo.add_place."""
+def add_runtime_landmark(landmark: Landmark) -> None {
+    RUNTIME_LANDMARKS[landmark.name] = landmark;
+}
+
+"""A landmark from the data files or one added at run time, or None."""
+def known_landmark(name: str) -> Landmark | None {
+    if name in RUNTIME_LANDMARKS {
+        return RUNTIME_LANDMARKS[name];
+    }
+    return landmark_named(name);
+}
+
 def validate_request(request: RunRequest) -> ValidationResult {
     errors: list[str] = [];
     if request.level not in LEVELS {
@@ -61,7 +77,7 @@ def validate_request(request: RunRequest) -> ValidationResult {
     if request.time_of_day not in TIMES {
         errors.append("time_of_day must be morning, afternoon, or evening");
     }
-    if request.start != "" and landmark_named(request.start) is None {
+    if request.start != "" and known_landmark(request.start) is None {
         errors.append("start must be a known landmark or empty");
     }
     if request.shape not in SHAPE_CHOICES {
@@ -381,7 +397,7 @@ def landmarks_for_request(request: RunRequest) -> list[Landmark] {
         }
     }
     if request.start != "" and all([lm.name != request.start for lm in landmarks]) {
-        chosen = landmark_named(request.start);
+        chosen = known_landmark(request.start);
         if chosen is not None {
             landmarks = [chosen] + landmarks;
         }

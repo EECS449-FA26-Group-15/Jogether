@@ -46,6 +46,22 @@ obj RouteOption {
         score: float = 0.0;
 }
 
+"""Register a place that is not in the data files, such as the runner's own
+start address, so routes can begin there.
+
+`walk_km` holds walking distances from the place to landmarks by name; pairs
+it does not cover fall back to the straight-line estimate in `leg_km`.
+"""
+def add_place(
+    name: str, lat: float, lon: float, elevation_m: float, walk_km: dict[str, float]
+) -> None {
+    COORDS[name] = (lat, lon);
+    ELEVATION_M[name] = elevation_m;
+    for (other, km) in walk_km.items() {
+        WALK_KM[f"{name}|{other}"] = km;
+    }
+}
+
 """Walking distance between two landmarks in km: measured when we have it, else estimated."""
 def leg_km(a: str, b: str) -> float {
     if a == b {

@@ -136,16 +136,23 @@ How a route is planned:
    stop to stop and the map says so. The runner taps a card to see every stop,
    the safety notes and the Google Maps link.
 
-The start is typed as an address: the server asks OpenStreetMap Nominatim for
-the coordinates, uses the nearest landmark within 2 km as the start, and
-switches to that landmark's area when it differs from the one picked. An
-address with no landmark near it is reported back instead of planning. Leave
-the address blank to start anywhere in the area.
+The start is typed as an address, and the routes start at that address
+itself, not at a landmark. The server asks the US Census geocoder first (it
+knows house numbers), then OpenStreetMap Nominatim with the address as typed
+and shorter forms of it (dropping extra street words, then the house number),
+so at least the street is found; the note above the cards says which. The
+address becomes a place of its own: one OSRM table call gives its walking
+distances to every landmark (straight-line estimates if that fails), Open-Meteo
+its elevation (the nearest landmark's if that fails). It must be within 2 km
+of a landmark we know, and the area switches to that landmark's area. An
+address that cannot be found, or is too far out, is reported back instead of
+planning. Leave the address blank to start anywhere in the area.
 
-At run time the server talks to three OpenStreetMap services: Nominatim (only
-when an address is typed), the OSRM foot router for the drawn path, and the
-standard tile server for the map pictures. Keep the demo's traffic light; the
-tile server's usage policy does not allow heavy automated use.
+At run time the server talks to the US Census geocoder and Nominatim (only
+when an address is typed), the OSRM foot router (table and route services),
+Open-Meteo, and the standard OpenStreetMap tile server for the map pictures.
+Keep the demo's traffic light; the tile server's usage policy does not allow
+heavy automated use.
 
 Landmark data (46 landmarks across the three areas, coordinates, 1035 walking
 distances, elevations) is generated: edit `tools/landmark_seed.py`, then run
