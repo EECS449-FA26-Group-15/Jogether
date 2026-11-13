@@ -7,7 +7,14 @@ import from routes {
     landmarks_for_time
 }
 import urllib.parse;
-import from planner { friendly, map_point, maps_link, parse_distance, to_km }
+import from planner {
+    friendly,
+    map_point,
+    maps_link,
+    parse_distance,
+    start_for_address,
+    to_km
+}
 
 test "miles are converted to km before planning" {
     assert abs(to_km("4", "mi") - 6.437) < 0.01;
@@ -71,4 +78,40 @@ test "map points use coordinates when we have them" {
 test "distance text parses to a number or NaN" {
     assert parse_distance("3.5") == 3.5;
     assert math.isnan(parse_distance("abc"));
+}
+
+def at_diag(address: str) -> tuple[float, float] | None {
+    return (42.2771, -83.73801);
+}
+
+def nowhere(address: str) -> tuple[float, float] | None {
+    return None;
+}
+
+def in_detroit(address: str) -> tuple[float, float] | None {
+    return (42.3314, -83.0458);
+}
+
+test "an empty address means no fixed start and no error" {
+    found = start_for_address("   ", at_diag);
+    assert found.landmark == "" and found.area == "" and found.error == "";
+}
+
+test "an address becomes the nearest landmark and its area" {
+    found = start_for_address("500 S State St", at_diag);
+    assert found.landmark == "The Diag";
+    assert found.area == "central-campus";
+    assert found.error == "";
+}
+
+test "an address that cannot be found explains itself" {
+    found = start_for_address("Nowhere Lane", nowhere);
+    assert found.landmark == "";
+    assert "Nowhere Lane" in found.error;
+}
+
+test "an address far from every landmark explains itself" {
+    found = start_for_address("Detroit", in_detroit);
+    assert found.landmark == "";
+    assert "2 km" in found.error;
 }

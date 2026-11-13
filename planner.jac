@@ -1,4 +1,4 @@
-"""Server endpoints the web page calls: plan a run, or fetch the example route."""
+"""Server endpoints the web page calls: plan three runs, or fetch the example route."""
 
 import json;
 import time;
@@ -6,30 +6,53 @@ import traceback;
 import urllib.parse;
 import urllib.request;
 import from geo { COORDS, straight_km_points }
-import from landmarks { all_landmarks, landmarks_for }
+import from landmarks { all_landmarks, landmark_named }
+import from maps { MapView, route_map }
 import from routes {
     RouteResult,
     RunRequest,
     example_route,
-    generate_route,
+    generate_routes,
     validate_request
 }
 
-glob KM_PER_MILE: float = 1.609344;
+glob KM_PER_MILE: float = 1.609344,
+     AREA_NAMES: dict[str, str] = {
+         "central-campus": "Central Campus",
+         "north-campus": "North Campus",
+         "downtown": "Downtown"
+     };
+
+"""One route the page can show: the route, its map picture, and a Google Maps link."""
+obj PlannedRoute {
+    has route: RouteResult,
+        maps_url: str,
+        view: MapView;
+}
 
 """What the page shows after the runner taps Generate.
 
 Route distances stay in km; `unit` says which unit the runner picked for display.
+`routes` holds up to three routes for the runner to choose from, best fit first.
 """
 obj RunPlan {
     has accepted: bool,
         errors: list[str],
-        route: RouteResult | None = None,
-        maps_url: str = "",
+        routes: list[PlannedRoute] = [],
+        start_note: str = "",
         seconds: float = 0.0,
         is_example: bool = False,
         unit: str = "km";
 }
+
+"""How a typed address became a start: the landmark and its area, or why not."""
+obj StartMatch {
+    has landmark: str = "",
+        area: str = "",
+        error: str = "";
+}
+
+glob Geocoder = Callable[[str], tuple[float, float] | None];
 
 """The distance the runner typed, converted to km; NaN if it is not a number."""
 def to_km(text: str, unit: str) -> float {
@@ -71,19 +94,14 @@ def maps_link(route: RouteResult) -> str {
     return "https://www.google.com/maps/dir/?" + urllib.parse.urlencode(params);
 }
 
-"""Landmark names a runner can start from in this area."""
-def:pub start_options(area: str) -> list[str] {
-    return [lm.name for lm in landmarks_for(area)];
-}
+"""Coordinates of a typed address in Ann Arbor, or None when nothing is found.
 
-"""The landmark nearest to a typed address in Ann Arbor, or "" when none is within 2 km.
-
-Uses OpenStreetMap Nominatim, so it needs the network; any failure returns "".
+Uses OpenStreetMap Nominatim, so it needs the network; any failure gives None.
 """
-def:pub nearest_start(address: str) -> str {
+def geocode(address: str) -> tuple[float, float] | None {
     text = address.strip()[:200];
     if text == "" {
-        return "";
+        return None;
     }
     query = text if "ann arbor" in text.lower() else f"{text}, Ann Arbor, Michigan";
     url = "https://nominatim.openstreetmap.org/search?"
@@ -92,20 +110,18 @@ def:pub nearest_start(address: str) -> str {
         );
     try {
         req = urllib.request.Request(
-            url, headers={"User-Agent": "Jogether-course-project/0.2 (EECS 449, UMich)"}
+            url, headers={"User-Agent": "Jogether-course-project/0.3 (EECS 449, UMich)"}
         );
         with urllib.request.urlopen(req, timeout=10) as resp {
             hits = json.load(resp);
         }
+        if len(hits) == 0 {
+            return None;
+        }
+        return (float(hits[0]["lat"]), float(hits[0]["lon"]));
     } except Exception {
-        return "";
+        return None;
     }
-    if len(hits) == 0 {
-        return "";
-    }
-    lat = float(hits[0]["lat"]);
-    lon = float(hits[0]["lon"]);
-    return nearest_landmark(lat, lon);
 }
 
 """Name of the landmark closest to a coordinate, or "" when none is within 2 km."""
@@ -124,6 +140,34 @@ def nearest_landmark(lat: float, lon: float) -> str {
         }
     }
     return best;
+}
+
+"""The start for a typed address: the nearest landmark within 2 km and its area.
+
+An empty address means no fixed start. An address that cannot be found, or has
+no landmark near it, gives an error message for the runner instead.
+"""
+def start_for_address(address: str, geocoder: Geocoder = geocode) -> StartMatch {
+    text = address.strip()[:200];
+    if text == "" {
+        return StartMatch();
+    }
+    found = geocoder(text);
+    if found is None {
+        return StartMatch(
+            error=f'We could not find "{text}" in Ann Arbor. Check the address and your connection, or leave the start blank.'
+        );
+    }
+    name = nearest_landmark(found[0], found[1]);
+    if name == "" {
+        return StartMatch(
+            error=f'No landmark within 2 km of "{text}". Try an address closer to campus or downtown, or leave the start blank.'
+        );
+    }
+    landmark = landmark_named(name);
+    return StartMatch(
+        landmark=name, area=landmark.area if landmark is not None else ""
+    );
 }
 
 """Turn the distance text from the form into a number; NaN fails validation."""
@@ -159,7 +203,12 @@ def friendly(error: str, unit: str = "km") -> str {
     return error;
 }
 
-"""Validate the four answers, then ask the route agent for a route."""
+"""A route with its map and Google Maps link, ready for the page."""
+def planned(route: RouteResult) -> PlannedRoute {
+    return PlannedRoute(route=route, maps_url=maps_link(route), view=route_map(route));
+}
+
+"""Validate the answers, match the address to a start, then plan three routes."""
 def:pub plan_run(
     level: str,
     distance: str,
@@ -167,17 +216,34 @@ def:pub plan_run(
     area: str,
     time_of_day: str,
     notes: str,
-    start: str = "",
+    address: str = "",
     shape: str = "any"
 ) -> RunPlan {
     unit = "mi" if unit == "mi" else "km";
+    start = "";
+    start_note = "";
+    if address.strip() != "" {
+        matched = start_for_address(address);
+        if matched.error != "" {
+            return RunPlan(accepted=False, errors=[matched.error], unit=unit);
+        }
+        start = matched.landmark;
+        if matched.area != "" and matched.area != area {
+            area = matched.area;
+            start_note = f"Your address is nearest to {start} ({AREA_NAMES.get(
+                area, area
+            )}), so the routes start there.";
+        } else {
+            start_note = f"Routes start at {start}, the landmark nearest to your address.";
+        }
+    }
     request = RunRequest(
         level=level,
         distance_km=to_km(distance, unit),
         area=area,
         time_of_day=time_of_day,
         notes=notes.strip()[:300],
-        start=start.strip(),
+        start=start,
         shape=shape.strip() or "any"
     );
     checked = validate_request(request);
@@ -189,9 +255,9 @@ def:pub plan_run(
         );
     }
     started = time.time();
-    route: RouteResult | None = None;
+    routes: list[RouteResult] = [];
     try {
-        route = generate_route(request);
+        routes = generate_routes(request);
     } except Exception as err {
         traceback.print_exc();
         kind = type(err).__name__;
@@ -205,7 +271,7 @@ def:pub plan_run(
         );
     }
     seconds = round(time.time() - started, 1);
-    if route is None {
+    if len(routes) == 0 {
         return RunPlan(
             accepted=True,
             errors=[
@@ -218,8 +284,8 @@ def:pub plan_run(
     return RunPlan(
         accepted=True,
         errors=[],
-        route=route,
-        maps_url=maps_link(route),
+        routes=[planned(r) for r in routes],
+        start_note=start_note,
         seconds=seconds,
         unit=unit
     );
@@ -227,12 +293,10 @@ def:pub plan_run(
 
 """The hand-written example route, clearly marked as not AI-generated."""
 def:pub sample_run(unit: str) -> RunPlan {
-    route = example_route();
     return RunPlan(
         accepted=True,
         errors=[],
-        route=route,
-        maps_url=maps_link(route),
+        routes=[planned(example_route())],
         is_example=True,
         unit="mi" if unit == "mi" else "km"
     );

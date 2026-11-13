@@ -24,6 +24,17 @@
   routes the model gets to choose from. The CLI takes `--start`, `--shape`
   and `--notes`.
 
+- Three routes, map and address (branch `feat/three-routes-map-address`,
+  November 13): the page no longer has a start landmark menu. A typed address
+  goes to Nominatim, the nearest landmark within 2 km becomes the start, and
+  the area follows that landmark (`start_for_address` in `planner.jac`). One
+  ByLLM call, `plan_routes`, describes all three measured options; picks that
+  fail the check are dropped (`generate_routes` in `routes.jac`). `maps.jac`
+  computes, on the server, the OpenStreetMap tiles and the OSRM walking path
+  for each route, and the page draws them as SVG; the runner taps a card to
+  see the full route. Tests cover the address matching, the choice filtering
+  and the map geometry without the network.
+
 ## Next slice
 
 1. Field-check the landmark lighting and surfaces.

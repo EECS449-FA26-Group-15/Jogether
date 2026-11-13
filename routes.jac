@@ -4,7 +4,8 @@ Division of labour:
 - code picks the landmark pool, measures candidate routes (geo.jac) and checks
   the result;
 - the LLM turns the runner's free-text notes into structured preferences, then
-  chooses one measured option and writes the words on the route card.
+  writes the words on the route cards: one card per measured option on the web
+  page (`generate_routes`), or one chosen option for the CLI (`generate_route`).
 """
 
 import math;
@@ -219,6 +220,30 @@ def plan_route(
     request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
 ) -> RoutePick by llm();
 
+"""Every measured option described for this runner, best fit first."""
+obj RouteChoices {
+    has picks: list[RoutePick];
+}
+
+sem RouteChoices.picks = "One pick per option in the options list, each with its own 0-based option index, ordered from the best fit for this runner to the least";
+
+"""Describe every running route option for this runner, best fit first.
+
+Each option is already measured: run its stops in order in its shape (loop:
+back to the first stop; out-and-back: turn around at the last stop; one-way:
+finish at the last stop) and repeat for its laps. Return one pick for every
+option, each with that option's 0-based index, ordered from the option whose
+stops best match the runner's level, time of day and own words (notes) to the
+least fitting, using the landmark descriptions, tags, lighting and surfaces.
+Do not change, add or reorder stops. Give each pick its own title. Rate each
+difficulty from that option's distance, climb, laps, the runner's level and
+the surfaces. Base each pick's safety notes on its own stops' lighting and the
+time of day.
+"""
+def plan_routes(
+    request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
+) -> RouteChoices by llm();
+
 """Turn the LLM's pick into a route; None if it names an option that does not exist.
 
 Notes are matched to stops by name, so a note can never land on the wrong stop.
@@ -289,6 +314,10 @@ def check_route(route: RouteResult, landmarks: list[Landmark]) -> list[str] {
 glob Planner = Callable[
          [RunRequest, list[Landmark], list[RouteOption]],
          RoutePick
+     ],
+     ChoicePlanner = Callable[
+         [RunRequest, list[Landmark], list[RouteOption]],
+         RouteChoices
      ],
      MAX_WAYPOINTS: int = 6,
      MIN_REACH_KM: float = 1.2,
@@ -411,4 +440,56 @@ def generate_route(
         }
     }
     return None;
+}
+
+"""Routes from the picks that pass the check, one per option, in the picks' order.
+
+A pick that names a missing option, repeats an option already used, or fails
+the check is dropped.
+"""
+def valid_routes(
+    picks: list[RoutePick], options: list[RouteOption], landmarks: list[Landmark]
+) -> list[RouteResult] {
+    routes: list[RouteResult] = [];
+    used: list[int] = [];
+    for pick in picks {
+        if pick.option in used {
+            continue;
+        }
+        route = build_route(pick, options, landmarks);
+        if route is None or check_route(route, landmarks) != [] {
+            continue;
+        }
+        used.append(pick.option);
+        routes.append(route);
+    }
+    return routes;
+}
+
+"""Plan up to three routes for a validated request, retrying once if none passes.
+
+Code reads the notes into preferences (through the LLM) and measures the
+candidate routes; one LLM call then describes every candidate, best fit
+first, so the runner can choose.
+"""
+def generate_routes(
+    request: RunRequest,
+    planner: ChoicePlanner = plan_routes,
+    seed: int | None = None,
+    pref_parser: PrefParser = parse_notes
+) -> list[RouteResult] {
+    landmarks = landmarks_for_request(request);
+    prefs = preferences_for(request, pref_parser);
+    options = options_for(request, landmarks, prefs, seed);
+    if len(options) == 0 {
+        return [];
+    }
+    for _ in range(2) {
+        choices = planner(request, landmarks, options);
+        routes = valid_routes(choices.picks, options, landmarks);
+        if len(routes) > 0 {
+            return routes;
+        }
+    }
+    return [];
 }
