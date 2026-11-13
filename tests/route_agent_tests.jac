@@ -66,7 +66,7 @@ test "generate retries once and returns the passing route" {
 }
 
 test "generate gives up after two failed routes" {
-    mock = MockLLM(outputs=[pick(7), pick(0, difficulty=9)]);
+    mock = MockLLM(outputs=[pick(7), pick(8)]);
     def plan(
         request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
     ) -> RoutePick by mock();

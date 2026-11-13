@@ -4,7 +4,8 @@ Division of labour:
 - code picks the landmark pool, measures candidate routes (geo.jac) and checks
   the result;
 - the LLM turns the runner's free-text notes into structured preferences, then
-  chooses one measured option and writes the words on the route card.
+  writes the words on the route cards: one card per measured option on the web
+  page (`generate_routes`), or one chosen option for the CLI (`generate_route`).
 """
 
 import math;
@@ -45,6 +46,22 @@ glob LEVELS: list[str] = ["beginner", "intermediate", "experienced"],
      TIMES: list[str] = ["morning", "afternoon", "evening"],
      SHAPE_CHOICES: list[str] = ["any"] + SHAPES;
 
+"""Landmarks added while the server runs (a runner's own start address), by name."""
+glob RUNTIME_LANDMARKS: dict[str, Landmark] = {};
+
+"""Make a place the planner can start from; its coordinates go to geo.add_place."""
+def add_runtime_landmark(landmark: Landmark) -> None {
+    RUNTIME_LANDMARKS[landmark.name] = landmark;
+}
+
+"""A landmark from the data files or one added at run time, or None."""
+def known_landmark(name: str) -> Landmark | None {
+    if name in RUNTIME_LANDMARKS {
+        return RUNTIME_LANDMARKS[name];
+    }
+    return landmark_named(name);
+}
+
 def validate_request(request: RunRequest) -> ValidationResult {
     errors: list[str] = [];
     if request.level not in LEVELS {
@@ -60,7 +77,7 @@ def validate_request(request: RunRequest) -> ValidationResult {
     if request.time_of_day not in TIMES {
         errors.append("time_of_day must be morning, afternoon, or evening");
     }
-    if request.start != "" and landmark_named(request.start) is None {
+    if request.start != "" and known_landmark(request.start) is None {
         errors.append("start must be a known landmark or empty");
     }
     if request.shape not in SHAPE_CHOICES {
@@ -219,18 +236,52 @@ def plan_route(
     request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
 ) -> RoutePick by llm();
 
+"""Every measured option described for this runner, best fit first."""
+obj RouteChoices {
+    has picks: list[RoutePick];
+}
+
+sem RouteChoices.picks = "One pick per option in the options list, each with its own 0-based option index, ordered from the best fit for this runner to the least";
+
+"""Describe every running route option for this runner, best fit first.
+
+Each option is already measured: run its stops in order in its shape (loop:
+back to the first stop; out-and-back: turn around at the last stop; one-way:
+finish at the last stop) and repeat for its laps. Return one pick for every
+option, each with that option's 0-based index, ordered from the option whose
+stops best match the runner's level, time of day and own words (notes) to the
+least fitting, using the landmark descriptions, tags, lighting and surfaces.
+Do not change, add or reorder stops. Give each pick its own title. Rate each
+difficulty from that option's distance, climb, laps, the runner's level and
+the surfaces. Base each pick's safety notes on its own stops' lighting and the
+time of day.
+"""
+def plan_routes(
+    request: RunRequest, landmarks: list[Landmark], options: list[RouteOption]
+) -> RouteChoices by llm();
+
 """Turn the LLM's pick into a route; None if it names an option that does not exist.
 
 Notes are matched to stops by name, so a note can never land on the wrong stop.
 A stop the LLM did not describe gets its landmark description instead.
 """
 def build_route(
-    pick: RoutePick, options: list[RouteOption], landmarks: list[Landmark]
+    pick: RoutePick,
+    options: list[RouteOption],
+    landmarks: list[Landmark],
+    level: str = "intermediate"
 ) -> RouteResult | None {
     if not (0 <= pick.option < len(options)) {
         return None;
     }
     chosen = options[pick.option];
+    difficulty = pick.difficulty;
+    if not (1 <= difficulty <= 5) {
+        difficulty = code_difficulty(chosen, level);
+        print(
+            f"difficulty {pick.difficulty} from the model replaced by the code estimate {difficulty} ({pick.title})"
+        );
+    }
     written = {
         w.name: w.note
         for w in pick.stops
@@ -245,13 +296,42 @@ def build_route(
         title=pick.title,
         waypoints=waypoints,
         distance_km=chosen.distance_km,
-        difficulty=pick.difficulty,
+        difficulty=difficulty,
         difficulty_reason=pick.difficulty_reason,
-        safety_notes=pick.safety_notes,
+        safety_notes=pick.safety_notes[:3],
         laps=chosen.laps,
         shape=chosen.shape,
         climb_m=chosen.climb_m
     );
+}
+
+"""Difficulty 1 (easiest) to 5 estimated by code from a measured option.
+
+Used when the model's rating is outside 1 to 5: distance adds a point at
+2.5, 4.5, 7 and 9 km, uphill at 40 and 90 m, more than two laps one more;
+intermediate runners knock one point off a rating of 3 or more and
+experienced runners always one.
+"""
+def code_difficulty(option: RouteOption, level: str) -> int {
+    score = 1;
+    for step in [2.5, 4.5, 7.0, 9.0] {
+        if option.distance_km >= step {
+            score += 1;
+        }
+    }
+    if option.climb_m >= 40 {
+        score += 1;
+    }
+    if option.climb_m >= 90 {
+        score += 1;
+    }
+    if option.laps > 2 {
+        score += 1;
+    }
+    if level == "experienced" or (level == "intermediate" and score >= 3) {
+        score -= 1;
+    }
+    return min(5, max(1, score));
 }
 
 """Return problems with a generated route; an empty list means it passes."""
@@ -289,6 +369,10 @@ def check_route(route: RouteResult, landmarks: list[Landmark]) -> list[str] {
 glob Planner = Callable[
          [RunRequest, list[Landmark], list[RouteOption]],
          RoutePick
+     ],
+     ChoicePlanner = Callable[
+         [RunRequest, list[Landmark], list[RouteOption]],
+         RouteChoices
      ],
      MAX_WAYPOINTS: int = 6,
      MIN_REACH_KM: float = 1.2,
@@ -352,7 +436,7 @@ def landmarks_for_request(request: RunRequest) -> list[Landmark] {
         }
     }
     if request.start != "" and all([lm.name != request.start for lm in landmarks]) {
-        chosen = landmark_named(request.start);
+        chosen = known_landmark(request.start);
         if chosen is not None {
             landmarks = [chosen] + landmarks;
         }
@@ -405,10 +489,74 @@ def generate_route(
     }
     for _ in range(2) {
         pick = planner(request, landmarks, options);
-        route = build_route(pick, options, landmarks);
+        route = build_route(pick, options, landmarks, request.level);
         if route is not None and check_route(route, landmarks) == [] {
             return route;
         }
     }
     return None;
+}
+
+"""Routes from the picks that pass the check, one per option, in the picks' order.
+
+A pick that names a missing option, repeats an option already used, or fails
+the check is dropped.
+"""
+def valid_routes(
+    picks: list[RoutePick],
+    options: list[RouteOption],
+    landmarks: list[Landmark],
+    level: str = "intermediate"
+) -> list[RouteResult] {
+    routes: list[RouteResult] = [];
+    used: list[int] = [];
+    for pick in picks {
+        if pick.option in used {
+            print(
+                f"route pick dropped: option {pick.option} already used ({pick.title})"
+            );
+            continue;
+        }
+        route = build_route(pick, options, landmarks, level);
+        if route is None {
+            print(f"route pick dropped: no option {pick.option} ({pick.title})");
+            continue;
+        }
+        problems = check_route(route, landmarks);
+        if problems != [] {
+            print(f"route pick dropped: {'; '.join(problems)} ({pick.title})");
+            continue;
+        }
+        used.append(pick.option);
+        routes.append(route);
+    }
+    return routes;
+}
+
+"""Plan up to three routes for a validated request, retrying once if none passes.
+
+Code reads the notes into preferences (through the LLM) and measures the
+candidate routes; one LLM call then describes every candidate, best fit
+first, so the runner can choose.
+"""
+def generate_routes(
+    request: RunRequest,
+    planner: ChoicePlanner = plan_routes,
+    seed: int | None = None,
+    pref_parser: PrefParser = parse_notes
+) -> list[RouteResult] {
+    landmarks = landmarks_for_request(request);
+    prefs = preferences_for(request, pref_parser);
+    options = options_for(request, landmarks, prefs, seed);
+    if len(options) == 0 {
+        return [];
+    }
+    for _ in range(2) {
+        choices = planner(request, landmarks, options);
+        routes = valid_routes(choices.picks, options, landmarks, request.level);
+        if len(routes) > 0 {
+            return routes;
+        }
+    }
+    return [];
 }

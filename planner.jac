@@ -1,35 +1,132 @@
-"""Server endpoints the web page calls: plan a run, or fetch the example route."""
+"""Server endpoints the web page calls: plan three runs, or fetch the example route."""
 
 import json;
+import math;
 import time;
 import traceback;
 import urllib.parse;
 import urllib.request;
-import from geo { COORDS, straight_km_points }
-import from landmarks { all_landmarks, landmarks_for }
+import from geo_data { ELEVATION_M }
+import from geo { COORDS, add_place, straight_km_points }
+import from landmarks { Landmark, all_landmarks, landmark_named }
+import from maps { RouteGeometry, route_geometry }
 import from routes {
     RouteResult,
     RunRequest,
+    add_runtime_landmark,
     example_route,
-    generate_route,
+    generate_routes,
+    known_landmark,
     validate_request
 }
 
-glob KM_PER_MILE: float = 1.609344;
+glob KM_PER_MILE: float = 1.609344,
+     AREA_NAMES: dict[str, str] = {
+         "central-campus": "Central Campus",
+         "north-campus": "North Campus",
+         "downtown": "Downtown"
+     },
+     USER_AGENT: str = "Jogether-course-project/0.3 (EECS 449, UMich)";
 
-"""What the page shows after the runner taps Generate.
+"""One route the page can show: the route, its map geometry, and a Google Maps link."""
+obj PlannedRoute {
+    has route: RouteResult,
+        maps_url: str,
+        geometry: RouteGeometry;
+}
+
+"""What the page shows after the runner taps the button.
 
 Route distances stay in km; `unit` says which unit the runner picked for display.
+`routes` holds up to three routes for the runner to choose from, best fit first.
 """
 obj RunPlan {
     has accepted: bool,
         errors: list[str],
-        route: RouteResult | None = None,
-        maps_url: str = "",
+        routes: list[PlannedRoute] = [],
+        start_note: str = "",
         seconds: float = 0.0,
         is_example: bool = False,
         unit: str = "km";
 }
+
+"""How a typed address or a pinned point became a start, or why it could not.
+
+`landmark` is the name the planner starts from: the point itself, registered
+as a place of its own. `area` is the area of the nearest curated landmark.
+`place` is what the address lookup found; `exact` says whether that was the
+house itself (or a pin) rather than just its street.
+"""
+obj StartMatch {
+    has landmark: str = "",
+        area: str = "",
+        place: str = "",
+        exact: bool = False,
+        error: str = "";
+}
+
+"""What the address lookup gave back.
+
+`reachable` is False when no lookup service could be reached at all, so the
+page can say so instead of blaming the address. `exact` is True for a match
+with the house number, False for a street-level match.
+"""
+obj GeoResult {
+    has found: bool = False,
+        reachable: bool = True,
+        exact: bool = False,
+        lat: float = 0.0,
+        lon: float = 0.0,
+        place: str = "";
+}
+
+glob Geocoder = Callable[[str], GeoResult],
+     TableFetcher = Callable[
+         [tuple[float, float], list[tuple[float, float]]],
+         list[float] | None
+     ],
+     ElevationFetcher = Callable[[float, float], float | None];
+
+"""Street words people add after a name, which are dropped one at a time on retry."""
+glob STREET_WORDS: list[str] = [
+         "dr",
+         "drive",
+         "st",
+         "street",
+         "ave",
+         "avenue",
+         "rd",
+         "road",
+         "ln",
+         "lane",
+         "blvd",
+         "boulevard",
+         "ct",
+         "court",
+         "pl",
+         "place",
+         "way",
+         "cir",
+         "circle",
+         "ter",
+         "terrace",
+         "trl",
+         "trail",
+         "pkwy",
+         "parkway",
+         "hwy",
+         "highway"
+     ],
+     MAX_ADDRESS_QUERIES: int = 6,
+     NOMINATIM_PAUSE_S: float = 1.0,
+     ANN_ARBOR_VIEWBOX: str = "-83.82,42.34,-83.62,42.20",
+     ANN_ARBOR_LAT: tuple[float, float] = (42.20, 42.34),
+     ANN_ARBOR_LON: tuple[float, float] = (-83.82, -83.62),
+     START_SUFFIX: str = " (your start)",
+     PIN_PLACE: str = "Map pin";
+
+"""Address lookups already done this session, by the text typed."""
+glob GEOCODE_CACHE: dict[str, GeoResult] = {};
 
 """The distance the runner typed, converted to km; NaN if it is not a number."""
 def to_km(text: str, unit: str) -> float {
@@ -71,44 +168,186 @@ def maps_link(route: RouteResult) -> str {
     return "https://www.google.com/maps/dir/?" + urllib.parse.urlencode(params);
 }
 
-"""Landmark names a runner can start from in this area."""
-def:pub start_options(area: str) -> list[str] {
-    return [lm.name for lm in landmarks_for(area)];
+"""Fetch a URL as JSON with our User-Agent; raises when it cannot be reached."""
+def fetch_json(url: str, timeout: int = 10) -> any {
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT});
+    with urllib.request.urlopen(req, timeout=timeout) as resp {
+        data = json.load(resp);
+    }
+    return data;
 }
 
-"""The landmark nearest to a typed address in Ann Arbor, or "" when none is within 2 km.
+"""True inside the box around Ann Arbor that address lookups are limited to."""
+def in_ann_arbor(lat: float, lon: float) -> bool {
+    return ANN_ARBOR_LAT[0] <= lat <= ANN_ARBOR_LAT[1]
+        and ANN_ARBOR_LON[0] <= lon <= ANN_ARBOR_LON[1];
+}
 
-Uses OpenStreetMap Nominatim, so it needs the network; any failure returns "".
+"""The queries to try for a typed address, most specific first.
+
+People type extra street words ("Hideaway Ln Dr") or house numbers the map
+does not know. Each later query drops one trailing street word, and the second
+half of the list drops the house number too, so the street itself can still be
+found: "1719 Hideaway Ln Dr" tries "1719 Hideaway Ln", "1719 Hideaway",
+"Hideaway Ln Dr", "Hideaway Ln", "Hideaway".
 """
-def:pub nearest_start(address: str) -> str {
-    text = address.strip()[:200];
-    if text == "" {
-        return "";
+def address_queries(text: str) -> list[str] {
+    words = [
+        w
+        for w in text.replace(",", " ").split()
+        if w != ""
+    ];
+    queries: list[str] = [];
+    bases = [words];
+    if len(words) > 1 and words[0].isdigit() {
+        bases.append(words[1:]);
     }
-    query = text if "ann arbor" in text.lower() else f"{text}, Ann Arbor, Michigan";
+    for base in bases {
+        current = list(base);
+        while len(current) > 0 {
+            query = " ".join(current);
+            if query not in queries {
+                queries.append(query);
+            }
+            if len(current) > 1 and current[-1].lower().rstrip(".") in STREET_WORDS {
+                current = current[:-1];
+            } else {
+                break;
+            }
+        }
+    }
+    return queries[:MAX_ADDRESS_QUERIES];
+}
+
+"""The house itself from the US Census geocoder, which interpolates house
+numbers along US streets; not found when it has no match inside Ann Arbor.
+Raises when the service cannot be reached.
+"""
+def census_search(address: str) -> GeoResult {
+    text = address if "ann arbor" in address.lower() else f"{address}, Ann Arbor, MI";
+    url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?"
+        + urllib.parse.urlencode(
+            {"address": text, "benchmark": "Public_AR_Current", "format": "json"}
+        );
+    data = fetch_json(url, 12);
+    for hit in data.get("result", {}).get("addressMatches", []) {
+        lat = float(hit["coordinates"]["y"]);
+        lon = float(hit["coordinates"]["x"]);
+        if not in_ann_arbor(lat, lon) {
+            continue;
+        }
+        place = str(hit.get("matchedAddress", address)).split(",")[0].strip().title();
+        return GeoResult(
+            found=True, exact=True, lat=lat, lon=lon, place=place or address
+        );
+    }
+    return GeoResult(found=False);
+}
+
+"""One Nominatim search limited to the Ann Arbor area; raises when unreachable."""
+def nominatim_search(query: str) -> list[dict[str, any]] {
+    text = query if "ann arbor" in query.lower() else f"{query}, Ann Arbor, Michigan";
     url = "https://nominatim.openstreetmap.org/search?"
         + urllib.parse.urlencode(
-            {"q": query, "format": "json", "limit": 1, "countrycodes": "us"}
+            {
+                "q": text,
+                "format": "json",
+                "limit": 1,
+                "countrycodes": "us",
+                "viewbox": ANN_ARBOR_VIEWBOX,
+                "bounded": 1
+            }
         );
-    try {
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "Jogether-course-project/0.2 (EECS 449, UMich)"}
-        );
-        with urllib.request.urlopen(req, timeout=10) as resp {
-            hits = json.load(resp);
-        }
-    } except Exception {
-        return "";
-    }
-    if len(hits) == 0 {
-        return "";
-    }
-    lat = float(hits[0]["lat"]);
-    lon = float(hits[0]["lon"]);
-    return nearest_landmark(lat, lon);
+    return fetch_json(url, 10);
 }
 
-"""Name of the landmark closest to a coordinate, or "" when none is within 2 km."""
+"""A Nominatim hit as a result: a house when the name starts with its number."""
+def nominatim_result(hit: dict[str, any], query: str) -> GeoResult {
+    parts = [p.strip() for p in str(hit.get("display_name", query)).split(",")];
+    exact = len(parts) > 1 and parts[0].isdigit();
+    place = f"{parts[0]} {parts[1]}" if exact else (parts[0] if parts else query);
+    return GeoResult(
+        found=True,
+        exact=exact,
+        lat=float(hit["lat"]),
+        lon=float(hit["lon"]),
+        place=place or query
+    );
+}
+
+"""Where a typed address is.
+
+The US Census geocoder is asked first, because it knows house numbers. Then
+OpenStreetMap Nominatim is tried with the address as typed and shorter forms
+of it (see `address_queries`), pausing between calls as its usage policy asks,
+which finds at least the street. Needs the network; results are cached.
+"""
+def geocode(address: str) -> GeoResult {
+    text = address.strip()[:200];
+    if text == "" {
+        return GeoResult();
+    }
+    if text in GEOCODE_CACHE {
+        return GEOCODE_CACHE[text];
+    }
+    reachable = False;
+    census: GeoResult | None = None;
+    try {
+        census = census_search(text);
+    } except Exception {
+        census = None;
+    }
+    if census is not None {
+        reachable = True;
+        if census.found {
+            GEOCODE_CACHE[text] = census;
+            return census;
+        }
+    }
+    for (i, query) in enumerate(address_queries(text)) {
+        if i > 0 {
+            time.sleep(NOMINATIM_PAUSE_S);
+        }
+        try {
+            hits = nominatim_search(query);
+        } except Exception {
+            continue;
+        }
+        reachable = True;
+        if len(hits) == 0 {
+            continue;
+        }
+        result = nominatim_result(hits[0], query);
+        GEOCODE_CACHE[text] = result;
+        return result;
+    }
+    return GeoResult(found=False, reachable=reachable);
+}
+
+"""A point the runner pinned on the map, as a lookup result."""
+def pin_result(lat: float, lon: float) -> GeoResult {
+    return GeoResult(found=True, exact=True, lat=lat, lon=lon, place=PIN_PLACE);
+}
+
+"""The "lat,lon" text the page sends for a pinned point, or None when it is not one."""
+def parse_pin(text: str) -> tuple[float, float] | None {
+    parts = text.replace(" ", "").split(",");
+    if len(parts) != 2 {
+        return None;
+    }
+    try {
+        lat = float(parts[0]);
+        lon = float(parts[1]);
+    } except ValueError {
+        return None;
+    }
+    if not (math.isfinite(lat) and math.isfinite(lon)) {
+        return None;
+    }
+    return (lat, lon);
+}
+
+"""Name of the curated landmark closest to a coordinate, or "" when none is within 2 km."""
 def nearest_landmark(lat: float, lon: float) -> str {
     best = "";
     best_km = 2.0;
@@ -124,6 +363,157 @@ def nearest_landmark(lat: float, lon: float) -> str {
         }
     }
     return best;
+}
+
+"""Walking distances in km from one point to many, from the OSRM foot router's
+table service in a single call; None when it cannot be reached or answers oddly.
+"""
+def osrm_table_km(
+    origin: tuple[float, float], targets: list[tuple[float, float]]
+) -> list[float] | None {
+    if len(targets) == 0 {
+        return [];
+    }
+    coords = ";".join(
+        [f"{origin[1]},{origin[0]}"] + [f"{t[1]},{t[0]}" for t in targets]
+    );
+    url = (
+        "https://routing.openstreetmap.de/routed-foot/table/v1/foot/"
+        + coords
+        + "?sources=0&annotations=distance"
+    );
+    data = fetch_json(url, 10);
+    row = data["distances"][0][1:];
+    if len(row) != len(targets) {
+        return None;
+    }
+    return [float(m) / 1000.0 if m is not None else float("nan") for m in row];
+}
+
+"""Height above sea level from Open-Meteo, or None when it cannot be reached."""
+def open_meteo_elevation(lat: float, lon: float) -> float | None {
+    url = "https://api.open-meteo.com/v1/elevation?"
+        + urllib.parse.urlencode({"latitude": lat, "longitude": lon});
+    data = fetch_json(url, 8);
+    values = data.get("elevation", []);
+    return float(values[0]) if len(values) > 0 else None;
+}
+
+"""Make a found point a place routes can start from, and name it.
+
+The place gets its coordinates, its elevation (Open-Meteo, else the nearest
+landmark's) and walking distances to every curated landmark (one OSRM table
+call; pairs it misses fall back to straight-line estimates). It must lie
+within 2 km of a curated landmark, whose area becomes the request's area. A
+place already registered at the same coordinates is reused.
+"""
+def register_start(
+    found: GeoResult,
+    table: TableFetcher = osrm_table_km,
+    elevation: ElevationFetcher = open_meteo_elevation
+) -> StartMatch {
+    nearest = nearest_landmark(found.lat, found.lon);
+    if nearest == "" {
+        return StartMatch(
+            error=f'"{found.place}" is more than 2 km from every place we know. Try a point closer to campus or downtown, or leave the start blank.'
+        );
+    }
+    near = landmark_named(nearest);
+    area = near.area if near is not None else "";
+    name = found.place + START_SUFFIX;
+    if known_landmark(name) is None or COORDS.get(name) != (found.lat, found.lon) {
+        targets = [
+            lm
+            for lm in all_landmarks()
+            if lm.name in COORDS
+        ];
+        kms: list[float] = [];
+        try {
+            got = table((found.lat, found.lon), [COORDS[lm.name] for lm in targets]);
+            kms = got if got is not None else [];
+        } except Exception {
+            kms = [];
+        }
+        walk: dict[str, float] = {};
+        if len(kms) == len(targets) {
+            for (i, lm) in enumerate(targets) {
+                if math.isfinite(kms[i]) and kms[i] > 0 {
+                    walk[lm.name] = round(kms[i], 3);
+                }
+            }
+        }
+        height: float | None = None;
+        try {
+            height = elevation(found.lat, found.lon);
+        } except Exception {
+            height = None;
+        }
+        if height is None {
+            height = ELEVATION_M.get(nearest, 0.0);
+        }
+        add_place(name, found.lat, found.lon, height, walk);
+        add_runtime_landmark(
+            Landmark(
+                name=name,
+                area=area,
+                description="Your start",
+                lighting="unknown",
+                surface="pavement",
+                good_times=["morning", "afternoon", "evening"],
+                tags=[]
+            )
+        );
+    }
+    return StartMatch(landmark=name, area=area, place=found.place, exact=found.exact);
+}
+
+"""The start for a typed address: the address itself as a place to run from.
+
+An empty address means no fixed start. An address that cannot be found, or is
+far from every landmark, gives an error message for the runner instead.
+"""
+def start_for_address(
+    address: str,
+    geocoder: Geocoder = geocode,
+    table: TableFetcher = osrm_table_km,
+    elevation: ElevationFetcher = open_meteo_elevation
+) -> StartMatch {
+    text = address.strip()[:200];
+    if text == "" {
+        return StartMatch();
+    }
+    found = geocoder(text);
+    if not found.reachable {
+        return StartMatch(
+            error="We could not reach the address lookup services. Check your connection, or leave the start blank."
+        );
+    }
+    if not found.found {
+        return StartMatch(
+            error=f'We could not find "{text}" in Ann Arbor. Try the street name with its number, like "500 S State St", or leave the start blank.'
+        );
+    }
+    return register_start(found, table, elevation);
+}
+
+"""The start for a point pinned on the map ("lat,lon" text from the page)."""
+def start_for_pin(
+    pin: str,
+    table: TableFetcher = osrm_table_km,
+    elevation: ElevationFetcher = open_meteo_elevation
+) -> StartMatch {
+    point = parse_pin(pin);
+    if point is None {
+        return StartMatch(
+            error="The pinned start could not be read. Pin it again or leave the start blank."
+        );
+    }
+    if not in_ann_arbor(point[0], point[1]) {
+        return StartMatch(
+            error="The pinned start is outside Ann Arbor. Pin a point closer to campus or downtown."
+        );
+    }
+    return register_start(pin_result(point[0], point[1]), table, elevation);
 }
 
 """Turn the distance text from the form into a number; NaN fails validation."""
@@ -159,7 +549,31 @@ def friendly(error: str, unit: str = "km") -> str {
     return error;
 }
 
-"""Validate the four answers, then ask the route agent for a route."""
+"""A route with its map geometry and Google Maps link, ready for the page."""
+def planned(route: RouteResult) -> PlannedRoute {
+    return PlannedRoute(
+        route=route, maps_url=maps_link(route), geometry=route_geometry(route)
+    );
+}
+
+"""The sentence above the route cards that says where the routes start."""
+def start_sentence(matched: StartMatch, area_before: str) -> str {
+    if matched.place == PIN_PLACE {
+        where = "Routes start at the point you pinned on the map.";
+    } elif matched.exact {
+        where = f"Routes start at {matched.place}, your address.";
+    } else {
+        where = f"We could not place the house number, so routes start at {matched.place}, the closest match to your address.";
+    }
+    if matched.area != "" and matched.area != area_before {
+        where += f" That is in {AREA_NAMES.get(
+            matched.area, matched.area
+        )}, so the area was switched.";
+    }
+    return where;
+}
+
+"""Validate the answers, make the pin or address the start, then plan three routes."""
 def:pub plan_run(
     level: str,
     distance: str,
@@ -167,17 +581,33 @@ def:pub plan_run(
     area: str,
     time_of_day: str,
     notes: str,
-    start: str = "",
-    shape: str = "any"
+    address: str = "",
+    shape: str = "any",
+    pin: str = ""
 ) -> RunPlan {
     unit = "mi" if unit == "mi" else "km";
+    start = "";
+    start_note = "";
+    if pin.strip() != "" or address.strip() != "" {
+        matched = start_for_pin(pin)
+            if pin.strip() != ""
+            else start_for_address(address);
+        if matched.error != "" {
+            return RunPlan(accepted=False, errors=[matched.error], unit=unit);
+        }
+        start = matched.landmark;
+        start_note = start_sentence(matched, area);
+        if matched.area != "" {
+            area = matched.area;
+        }
+    }
     request = RunRequest(
         level=level,
         distance_km=to_km(distance, unit),
         area=area,
         time_of_day=time_of_day,
         notes=notes.strip()[:300],
-        start=start.strip(),
+        start=start,
         shape=shape.strip() or "any"
     );
     checked = validate_request(request);
@@ -189,9 +619,9 @@ def:pub plan_run(
         );
     }
     started = time.time();
-    route: RouteResult | None = None;
+    routes: list[RouteResult] = [];
     try {
-        route = generate_route(request);
+        routes = generate_routes(request);
     } except Exception as err {
         traceback.print_exc();
         kind = type(err).__name__;
@@ -205,7 +635,7 @@ def:pub plan_run(
         );
     }
     seconds = round(time.time() - started, 1);
-    if route is None {
+    if len(routes) == 0 {
         return RunPlan(
             accepted=True,
             errors=[
@@ -218,8 +648,8 @@ def:pub plan_run(
     return RunPlan(
         accepted=True,
         errors=[],
-        route=route,
-        maps_url=maps_link(route),
+        routes=[planned(r) for r in routes],
+        start_note=start_note,
         seconds=seconds,
         unit=unit
     );
@@ -227,12 +657,10 @@ def:pub plan_run(
 
 """The hand-written example route, clearly marked as not AI-generated."""
 def:pub sample_run(unit: str) -> RunPlan {
-    route = example_route();
     return RunPlan(
         accepted=True,
         errors=[],
-        route=route,
-        maps_url=maps_link(route),
+        routes=[planned(example_route())],
         is_example=True,
         unit="mi" if unit == "mi" else "km"
     );

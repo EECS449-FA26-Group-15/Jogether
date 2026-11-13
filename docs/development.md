@@ -24,6 +24,24 @@
   routes the model gets to choose from. The CLI takes `--start`, `--shape`
   and `--notes`.
 
+- Three routes, map and address (branch `feat/three-routes-map-address`,
+  November 13): the page no longer has a start landmark menu. A typed address
+  is looked up (US Census geocoder for the house number, then Nominatim with
+  shorter forms of the address) and becomes a place of its own that routes
+  start from, with walking distances from one OSRM table call and elevation
+  from Open-Meteo; it must be within 2 km of a landmark, whose area is used
+  (`start_for_address` and `register_start` in `planner.jac`,
+  `known_landmark` in `routes.jac`, `add_place` in `geo.jac`). One
+  ByLLM call, `plan_routes`, describes all three measured options; picks that
+  fail the check are dropped and an out-of-range difficulty is replaced by a
+  code estimate (`generate_routes` and `code_difficulty` in `routes.jac`).
+  `maps.jac` fetches the OSRM walking path for each route; the page
+  (`frontend.jac`) is a two-column layout with a Leaflet map (npm `leaflet`)
+  that is live from the start: double-click pins the start, the chosen route
+  block is drawn on the map, and the button shows a progress bar while the
+  model works. Tests cover the address matching, the pin, the choice
+  filtering and the route geometry without the network.
+
 ## Next slice
 
 1. Field-check the landmark lighting and surfaces.

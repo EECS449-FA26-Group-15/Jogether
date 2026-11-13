@@ -23,11 +23,16 @@ that.
 
 The web demo works today:
 
-1. Answer four quick questions: your level, distance, area, and time of day.
-2. Optionally add a wish in your own words, like "I'd like to run along the river".
-3. Tap **Generate**. An LLM agent picks landmarks that suit your time of day,
-   orders them into a route, rates its difficulty, and writes safety notes.
-4. Open the route in Google Maps.
+1. Answer four quick questions on the left: your level, distance, area, and
+   time of day. The map on the right is live from the start.
+2. Optionally double-click the map to pin where you start, or type an
+   address, and add a wish in your own words, like "I'd like to run along the
+   river".
+3. Tap **Show me three routes**. Code measures candidate routes from landmarks
+   that suit your time of day; an LLM agent describes the three best, rates
+   each one's difficulty, and writes safety notes.
+4. Three short route blocks appear under the form. Tap one to draw it on the
+   map, read every stop, and open it in Google Maps.
 
 Still to come for the MVP: sign in with your umich.edu email, then save, run,
 and rate your routes.
@@ -93,9 +98,9 @@ jac install
 jac run
 ```
 
-Open http://localhost:8000, answer the questions, and tap **Generate my
-route**. The first request loads the model into memory and takes longer; after
-that a route takes a few seconds on an Apple Silicon laptop.
+Open http://localhost:8000, answer the questions, and tap **Show me three
+routes**. The first request loads the model into memory and takes longer; after
+that three routes take about 8 to 15 seconds on an Apple Silicon laptop.
 
 If `jac install` hangs while installing the web packages (seen on networks with
 broken IPv6), stop it and install them with npm instead, then run `jac run`:
@@ -118,19 +123,41 @@ How a route is planned:
    elsewhere. Each candidate is scored on distance, uphill metres, matched
    preferences and shape; repeating a loop for laps is only a fallback and is
    penalised. The 3 best candidates with different stops become the options.
-4. The LLM picks the option that best fits the runner's level, time of day and
-   own words, then writes the title, a note per stop, the difficulty and the
-   safety notes.
-5. The distance and climb on the card come from step 3, not from the LLM. Leg
+4. One LLM call describes every option, best fit for the runner's level, time
+   of day and own words first: a title, a note per stop, the difficulty and
+   the safety notes for each. A pick that names a missing option, repeats one,
+   or fails the output check is dropped, so the page shows one to three routes.
+5. The distance and climb on each card come from step 3, not from the LLM. Leg
    lengths are real walking distances from the OSRM foot router on
    OpenStreetMap, elevation is from Open-Meteo, so the card agrees with a
    walking-directions check to within about 0.1 mile. The Google Maps link
    shows one pass of the route.
+6. Each route comes with its geometry (`maps.jac`): the server asks the OSRM
+   foot router for the walking path through the stops and sends the line and
+   the numbered stops to the page. The page draws the chosen route with
+   Leaflet over OpenStreetMap tiles, in a map that can be panned and zoomed
+   from the start. If the router does not answer, the line is drawn straight
+   from stop to stop and the route block says so. The route block also lists
+   every stop, the safety notes and the Google Maps link.
 
-The start can be picked from the area's landmarks, or typed as an address: the
-page asks OpenStreetMap Nominatim for the coordinates and uses the nearest
-landmark within 2 km. That lookup is the only feature that needs the network
-at run time.
+The start is a point of the runner's own: either pinned by double-clicking
+the map, or typed as an address. For an address the server asks the US Census
+geocoder first (it knows house numbers), then OpenStreetMap Nominatim with the
+address as typed and shorter forms of it (dropping extra street words, then
+the house number), so at least the street is found; the note above the route
+blocks says which. The point becomes a place of its own: one OSRM table call
+gives its walking distances to every landmark (straight-line estimates if that
+fails), Open-Meteo its elevation (the nearest landmark's if that fails). It
+must be within 2 km of a landmark we know, and the area switches to that
+landmark's area. An address that cannot be found, or a point too far out, is
+reported back instead of planning. Leave both blank to start anywhere in the
+area.
+
+At run time the server talks to the US Census geocoder and Nominatim (only
+when an address is typed), the OSRM foot router (table and route services),
+Open-Meteo, and the standard OpenStreetMap tile server for the map pictures.
+Keep the demo's traffic light; the tile server's usage policy does not allow
+heavy automated use.
 
 Landmark data (46 landmarks across the three areas, coordinates, 1035 walking
 distances, elevations) is generated: edit `tools/landmark_seed.py`, then run
@@ -191,10 +218,11 @@ jac test -v
 | File | What it does |
 |---|---|
 | `main.jac` | Web app entry: serves the page and its endpoints |
-| `frontend.jac` | The page: the four questions, the Generate button, the route card |
-| `planner.jac` | Endpoints the page calls: `plan_run` and `sample_run`, plus the Google Maps link |
-| `routes.jac` | Request validation, the `RouteResult` shape, the ByLLM route call and its output check |
-| `geo.jac` | Landmark coordinates, measured loop distances, and the candidate loops the LLM chooses from |
+| `frontend.jac` | The page: the questions and route blocks on the left, the Leaflet map on the right (double-click pins the start), and the progress bar on the button |
+| `planner.jac` | Endpoints the page calls: `plan_run` (pin or address to start, three routes with geometry) and `sample_run`, plus the Google Maps link |
+| `routes.jac` | Request validation, the `RouteResult` shape, the ByLLM route calls (`plan_routes` for the page, `plan_route` for the CLI) and the output check |
+| `geo.jac` | Landmark coordinates, measured loop distances, and the candidate loops the LLM describes |
+| `maps.jac` | Route geometry for the map: the OSRM walking path and the numbered stops as coordinates |
 | `landmarks.jac` | The curated landmark list |
 | `cli.jac` | Command-line preview of the same planner |
 
