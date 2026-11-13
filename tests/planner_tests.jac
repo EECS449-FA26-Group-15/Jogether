@@ -22,6 +22,7 @@ import from planner {
     maps_link,
     parse_distance,
     start_for_address,
+    start_for_pin,
     start_sentence,
     to_km
 }
@@ -209,6 +210,23 @@ test "an address far from every landmark explains itself" {
     assert found.landmark == "";
     assert "2 km" in found.error;
     assert "Woodward Avenue" in found.error;
+}
+
+test "a pinned point becomes the start and a new pin moves it" {
+    first = start_for_pin("42.2781, -83.7375", flat_table, high_elevation);
+    assert first.error == "";
+    assert first.landmark == "Map pin (your start)";
+    assert first.area == "central-campus";
+    assert COORDS[first.landmark] == (42.2781, -83.7375);
+    second = start_for_pin("42.2912,-83.7176", flat_table, high_elevation);
+    assert second.landmark == first.landmark;
+    assert second.area == "north-campus";
+    assert COORDS[second.landmark] == (42.2912, -83.7176);
+    assert "pinned" in start_sentence(second, "north-campus");
+    assert "outside Ann Arbor"
+        in start_for_pin("42.33, -83.05", flat_table, high_elevation).error;
+    assert "could not be read"
+        in start_for_pin("somewhere", flat_table, high_elevation).error;
 }
 
 test "the start sentence says whether the house or only the street was found" {

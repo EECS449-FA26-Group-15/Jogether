@@ -33,11 +33,14 @@
   (`start_for_address` and `register_start` in `planner.jac`,
   `known_landmark` in `routes.jac`, `add_place` in `geo.jac`). One
   ByLLM call, `plan_routes`, describes all three measured options; picks that
-  fail the check are dropped (`generate_routes` in `routes.jac`). `maps.jac`
-  computes, on the server, the OpenStreetMap tiles and the OSRM walking path
-  for each route, and the page draws them as SVG; the runner taps a card to
-  see the full route. Tests cover the address matching, the choice filtering
-  and the map geometry without the network.
+  fail the check are dropped and an out-of-range difficulty is replaced by a
+  code estimate (`generate_routes` and `code_difficulty` in `routes.jac`).
+  `maps.jac` fetches the OSRM walking path for each route; the page
+  (`frontend.jac`) is a two-column layout with a Leaflet map (npm `leaflet`)
+  that is live from the start: double-click pins the start, the chosen route
+  block is drawn on the map, and the button shows a progress bar while the
+  model works. Tests cover the address matching, the pin, the choice
+  filtering and the route geometry without the network.
 
 ## Next slice
 

@@ -1,15 +1,6 @@
 import json;
 import from geo_data { COORDS }
-import from maps {
-    MAP_HEIGHT,
-    MAP_WIDTH,
-    fit_zoom,
-    map_view,
-    route_map,
-    route_points,
-    walking_path,
-    world_px
-}
+import from maps { route_geometry, route_points, walking_path }
 import from routes { example_route }
 
 def no_network(url: str) -> str {
@@ -71,51 +62,12 @@ test "without the router the path is the straight line between stops" {
     assert path == [tower, arb];
 }
 
-test "web mercator puts north and east where they belong" {
-    (x1, y1) = world_px(42.2771, -83.73801, 15);
-    (x2, y2) = world_px(42.2900, -83.72000, 15);
-    assert x2 > x1;
-    assert y2 < y1;
-}
-
-test "the picture fits every stop inside its padding at the deepest zoom" {
-    stops = [
-        (
-            COORDS["Michigan Stadium"][0],
-            COORDS["Michigan Stadium"][1],
-            "1",
-            "Michigan Stadium"
-        ),
-        (COORDS["Gallup Park"][0], COORDS["Gallup Park"][1], "2", "Gallup Park")
-    ];
-    path = [(s[0], s[1]) for s in stops];
-    view = map_view(path, stops);
-    assert view.width == MAP_WIDTH and view.height == MAP_HEIGHT;
-    assert fit_zoom(path, MAP_WIDTH, MAP_HEIGHT) == view.zoom;
-    assert len(view.markers) == 2;
-    for marker in view.markers {
-        assert 0 <= marker.x <= view.width , f"x {marker.x}";
-        assert 0 <= marker.y <= view.height , f"y {marker.y}";
-    }
-    assert len(view.tiles) > 0;
-    for tile in view.tiles {
-        assert tile.url.startswith(f"https://tile.openstreetmap.org/{view.zoom}/");
-        assert -256 < tile.x < view.width and -256 < tile.y < view.height;
-    }
-    assert len(view.path.split(" ")) == 2;
-    assert view.attribution != "";
-}
-
-test "a short route zooms in further than a long one" {
-    near = [COORDS["The Diag"], COORDS["Michigan Union"]];
-    far = [COORDS["Michigan Stadium"], COORDS["Gallup Park"]];
-    assert fit_zoom(near, MAP_WIDTH, MAP_HEIGHT) > fit_zoom(far, MAP_WIDTH, MAP_HEIGHT);
-}
-
-test "the route map numbers the stops in running order" {
-    view = route_map(example_route(), no_network);
-    assert [m.label for m in view.markers] == ["1", "2", "3", "4"];
-    assert view.markers[0].name == "Michigan Union";
-    assert not view.followed_streets;
-    assert len(view.path.split(" ")) == 5;
+test "the route geometry numbers the stops in running order" {
+    geometry = route_geometry(example_route(), no_network);
+    assert [s.label for s in geometry.stops] == ["1", "2", "3", "4"];
+    assert geometry.stops[0].name == "Michigan Union";
+    assert (geometry.stops[0].lat, geometry.stops[0].lon) == COORDS["Michigan Union"];
+    assert not geometry.followed_streets;
+    assert len(geometry.line) == 5;
+    assert geometry.line[0] == geometry.line[-1];
 }

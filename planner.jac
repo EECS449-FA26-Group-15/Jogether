@@ -9,7 +9,7 @@ import urllib.request;
 import from geo_data { ELEVATION_M }
 import from geo { COORDS, add_place, straight_km_points }
 import from landmarks { Landmark, all_landmarks, landmark_named }
-import from maps { MapView, route_map }
+import from maps { RouteGeometry, route_geometry }
 import from routes {
     RouteResult,
     RunRequest,
@@ -28,14 +28,14 @@ glob KM_PER_MILE: float = 1.609344,
      },
      USER_AGENT: str = "Jogether-course-project/0.3 (EECS 449, UMich)";
 
-"""One route the page can show: the route, its map picture, and a Google Maps link."""
+"""One route the page can show: the route, its map geometry, and a Google Maps link."""
 obj PlannedRoute {
     has route: RouteResult,
         maps_url: str,
-        view: MapView;
+        geometry: RouteGeometry;
 }
 
-"""What the page shows after the runner taps Generate.
+"""What the page shows after the runner taps the button.
 
 Route distances stay in km; `unit` says which unit the runner picked for display.
 `routes` holds up to three routes for the runner to choose from, best fit first.
@@ -50,12 +50,12 @@ obj RunPlan {
         unit: str = "km";
 }
 
-"""How a typed address became a start, or why it could not.
+"""How a typed address or a pinned point became a start, or why it could not.
 
-`landmark` is the name the planner starts from: the address itself, registered
+`landmark` is the name the planner starts from: the point itself, registered
 as a place of its own. `area` is the area of the nearest curated landmark.
 `place` is what the address lookup found; `exact` says whether that was the
-house itself rather than just its street.
+house itself (or a pin) rather than just its street.
 """
 obj StartMatch {
     has landmark: str = "",
@@ -122,7 +122,8 @@ glob STREET_WORDS: list[str] = [
      ANN_ARBOR_VIEWBOX: str = "-83.82,42.34,-83.62,42.20",
      ANN_ARBOR_LAT: tuple[float, float] = (42.20, 42.34),
      ANN_ARBOR_LON: tuple[float, float] = (-83.82, -83.62),
-     START_SUFFIX: str = " (your start)";
+     START_SUFFIX: str = " (your start)",
+     PIN_PLACE: str = "Map pin";
 
 """Address lookups already done this session, by the text typed."""
 glob GEOCODE_CACHE: dict[str, GeoResult] = {};
@@ -323,6 +324,29 @@ def geocode(address: str) -> GeoResult {
     return GeoResult(found=False, reachable=reachable);
 }
 
+"""A point the runner pinned on the map, as a lookup result."""
+def pin_result(lat: float, lon: float) -> GeoResult {
+    return GeoResult(found=True, exact=True, lat=lat, lon=lon, place=PIN_PLACE);
+}
+
+"""The "lat,lon" text the page sends for a pinned point, or None when it is not one."""
+def parse_pin(text: str) -> tuple[float, float] | None {
+    parts = text.replace(" ", "").split(",");
+    if len(parts) != 2 {
+        return None;
+    }
+    try {
+        lat = float(parts[0]);
+        lon = float(parts[1]);
+    } except ValueError {
+        return None;
+    }
+    if not (math.isfinite(lat) and math.isfinite(lon)) {
+        return None;
+    }
+    return (lat, lon);
+}
+
 """Name of the curated landmark closest to a coordinate, or "" when none is within 2 km."""
 def nearest_landmark(lat: float, lon: float) -> str {
     best = "";
@@ -375,12 +399,13 @@ def open_meteo_elevation(lat: float, lon: float) -> float | None {
     return float(values[0]) if len(values) > 0 else None;
 }
 
-"""Make a found address a place routes can start from, and name it.
+"""Make a found point a place routes can start from, and name it.
 
 The place gets its coordinates, its elevation (Open-Meteo, else the nearest
 landmark's) and walking distances to every curated landmark (one OSRM table
 call; pairs it misses fall back to straight-line estimates). It must lie
-within 2 km of a curated landmark, whose area becomes the request's area.
+within 2 km of a curated landmark, whose area becomes the request's area. A
+place already registered at the same coordinates is reused.
 """
 def register_start(
     found: GeoResult,
@@ -390,13 +415,13 @@ def register_start(
     nearest = nearest_landmark(found.lat, found.lon);
     if nearest == "" {
         return StartMatch(
-            error=f'"{found.place}" is more than 2 km from every place we know. Try an address closer to campus or downtown, or leave the start blank.'
+            error=f'"{found.place}" is more than 2 km from every place we know. Try a point closer to campus or downtown, or leave the start blank.'
         );
     }
     near = landmark_named(nearest);
     area = near.area if near is not None else "";
     name = found.place + START_SUFFIX;
-    if known_landmark(name) is None {
+    if known_landmark(name) is None or COORDS.get(name) != (found.lat, found.lon) {
         targets = [
             lm
             for lm in all_landmarks()
@@ -431,7 +456,7 @@ def register_start(
             Landmark(
                 name=name,
                 area=area,
-                description="Your start address",
+                description="Your start",
                 lighting="unknown",
                 surface="pavement",
                 good_times=["morning", "afternoon", "evening"],
@@ -471,6 +496,26 @@ def start_for_address(
     return register_start(found, table, elevation);
 }
 
+"""The start for a point pinned on the map ("lat,lon" text from the page)."""
+def start_for_pin(
+    pin: str,
+    table: TableFetcher = osrm_table_km,
+    elevation: ElevationFetcher = open_meteo_elevation
+) -> StartMatch {
+    point = parse_pin(pin);
+    if point is None {
+        return StartMatch(
+            error="The pinned start could not be read. Pin it again or leave the start blank."
+        );
+    }
+    if not in_ann_arbor(point[0], point[1]) {
+        return StartMatch(
+            error="The pinned start is outside Ann Arbor. Pin a point closer to campus or downtown."
+        );
+    }
+    return register_start(pin_result(point[0], point[1]), table, elevation);
+}
+
 """Turn the distance text from the form into a number; NaN fails validation."""
 def parse_distance(text: str) -> float {
     try {
@@ -504,18 +549,22 @@ def friendly(error: str, unit: str = "km") -> str {
     return error;
 }
 
-"""A route with its map and Google Maps link, ready for the page."""
+"""A route with its map geometry and Google Maps link, ready for the page."""
 def planned(route: RouteResult) -> PlannedRoute {
-    return PlannedRoute(route=route, maps_url=maps_link(route), view=route_map(route));
+    return PlannedRoute(
+        route=route, maps_url=maps_link(route), geometry=route_geometry(route)
+    );
 }
 
 """The sentence above the route cards that says where the routes start."""
 def start_sentence(matched: StartMatch, area_before: str) -> str {
-    where = (
-        f"Routes start at {matched.place}, your address."
-            if matched.exact
-            else f"We could not place the house number, so routes start at {matched.place}, the closest match to your address."
-    );
+    if matched.place == PIN_PLACE {
+        where = "Routes start at the point you pinned on the map.";
+    } elif matched.exact {
+        where = f"Routes start at {matched.place}, your address.";
+    } else {
+        where = f"We could not place the house number, so routes start at {matched.place}, the closest match to your address.";
+    }
     if matched.area != "" and matched.area != area_before {
         where += f" That is in {AREA_NAMES.get(
             matched.area, matched.area
@@ -524,7 +573,7 @@ def start_sentence(matched: StartMatch, area_before: str) -> str {
     return where;
 }
 
-"""Validate the answers, make the address the start, then plan three routes."""
+"""Validate the answers, make the pin or address the start, then plan three routes."""
 def:pub plan_run(
     level: str,
     distance: str,
@@ -533,13 +582,16 @@ def:pub plan_run(
     time_of_day: str,
     notes: str,
     address: str = "",
-    shape: str = "any"
+    shape: str = "any",
+    pin: str = ""
 ) -> RunPlan {
     unit = "mi" if unit == "mi" else "km";
     start = "";
     start_note = "";
-    if address.strip() != "" {
-        matched = start_for_address(address);
+    if pin.strip() != "" or address.strip() != "" {
+        matched = start_for_pin(pin)
+            if pin.strip() != ""
+            else start_for_address(address);
         if matched.error != "" {
             return RunPlan(accepted=False, errors=[matched.error], unit=unit);
         }
